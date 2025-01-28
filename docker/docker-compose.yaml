@@ -31,6 +31,8 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       AIRFLOW__WEBSERVER__RBAC: "True"
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 5  # Check for DAG updates every 5 seconds
+
     ports:
       - "8080:8080"
     volumes:
