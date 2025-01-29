@@ -5,6 +5,8 @@ import os
 import finnhub
 from datetime import datetime, timedelta
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from dag_config import POSTGRES_CONN_ID
+
 
 
 # Set up Airflow logger
@@ -69,40 +71,45 @@ with DAG(
 def store_tech_companies_in_postgres(**context):
     tech_companies = context['task_instance'].xcom_pull(task_ids='fetch_tech_companies_task')
     
-    # Add check for empty list
     if not tech_companies:
-        print("⚠️ No tech companies fetched. Skipping storage task.")
-        return  # Avoid failing the DAG
-    
-    print("Storing tech companies:", tech_companies)
-    
-    pg_hook = PostgresHook(postgres_conn_id='postgres_default')
-    conn = pg_hook.get_conn()
-    cursor = conn.cursor()
-    
-    create_table_query = """
-    CREATE TABLE IF NOT EXISTS tech_companies (
-        symbol VARCHAR PRIMARY KEY,
-        name VARCHAR,
-        finnhubIndustry VARCHAR
-    );
-    """
-    cursor.execute(create_table_query)
-    
-    for company in tech_companies:
-        insert_query = """
-        INSERT INTO tech_companies (symbol, name, finnhubIndustry)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (symbol) DO UPDATE SET
-        name = EXCLUDED.name,
-        finnhubIndustry = EXCLUDED.finnhubIndustry;
-        """
-        cursor.execute(insert_query, (company.get('symbol', ''), company.get('description', ''), company.get('finnhubIndustry', '')))
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
+        log.warning("⚠️ No tech companies fetched. Skipping storage task.")
+        return
 
+    log.info(f"📌 Storing {len(tech_companies)} tech companies in PostgreSQL.")
+
+    try:
+        pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+        conn = pg_hook.get_conn()
+        cursor = conn.cursor()
+        
+        # Ensure table exists
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS tech_companies (
+            symbol VARCHAR PRIMARY KEY,
+            name VARCHAR,
+            finnhubIndustry VARCHAR
+        );
+        """
+        cursor.execute(create_table_query)
+
+        for company in tech_companies:
+            log.info(f"📝 Inserting company: {company.get('symbol', '')} - {company.get('description', '')}")
+            cursor.execute("""
+                INSERT INTO tech_companies (symbol, name, finnhubIndustry)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (symbol) DO UPDATE SET
+                name = EXCLUDED.name,
+                finnhubIndustry = EXCLUDED.finnhubIndustry;
+            """, (company.get('symbol', ''), company.get('description', ''), company.get('finnhubIndustry', '')))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        log.info("✅ Successfully inserted tech companies into PostgreSQL.")
+    except Exception as e:
+        log.error(f"❌ Error inserting data into PostgreSQL: {e}")
+        raise
 
 default_args = {
     'owner': 'airflow',
