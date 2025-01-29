@@ -171,4 +171,7 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-trading_dashboard.code-workspace
+trading_dashboard.code
+
+# raw data
+data/raw/*
