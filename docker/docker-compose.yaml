@@ -1,3 +1,5 @@
+version: '3.7'
+
 networks:
   trading_network:
     driver: bridge
@@ -49,6 +51,12 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      GCS_BUCKET_NAME: trading_dashboard_stock_data
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/gcs_service_account.json
+    volumes:
+      - ../configs/gcs_service_account.json:/opt/airflow/configs/gcs_service_account.json
+      - ../dags:/opt/airflow/dags
+      - ../data:/opt/airflow/data
     command: >
       bash -c "
         airflow db check || airflow db init && airflow db upgrade &&
@@ -75,6 +83,8 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       AIRFLOW__WEBSERVER__RBAC: "True"
+      GCS_BUCKET_NAME: trading_dashboard_stock_data
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/gcs_service_account.json
     ports:
       - "8080:8080"
     volumes:
@@ -82,6 +92,7 @@ services:
       - airflow_logs:/opt/airflow/logs
       - airflow_plugins:/opt/airflow/plugins
       - ../data:/opt/airflow/data
+      - ../configs/gcs_service_account.json:/opt/airflow/configs/gcs_service_account.json
     command: ["airflow", "webserver"]
     networks:
       - trading_network
@@ -104,11 +115,14 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      GCS_BUCKET_NAME: trading_dashboard_stock_data
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/gcs_service_account.json
     volumes:
       - ../dags:/opt/airflow/dags
       - airflow_logs:/opt/airflow/logs
       - airflow_plugins:/opt/airflow/plugins
       - ../data:/opt/airflow/data
+      - ../configs/gcs_service_account.json:/opt/airflow/configs/
     command: ["airflow", "scheduler"]
     networks:
       - trading_network
