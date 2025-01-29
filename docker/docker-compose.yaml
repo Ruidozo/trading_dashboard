@@ -1,3 +1,7 @@
+networks:
+  trading_network:
+    driver: bridge
+
 services:
   postgres:
     image: postgres:13
@@ -10,6 +14,27 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - trading_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  project_postgres:
+    image: postgres:13
+    container_name: project_postgres
+    environment:
+      POSTGRES_USER: odiurdigital
+      POSTGRES_PASSWORD: dashboard
+      POSTGRES_DB: project_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - project_data:/var/lib/postgresql/data
+    networks:
+      - trading_network
 
   airflow-init:
     build:
@@ -24,7 +49,12 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
-    command: ["airflow", "db", "init"]
+    command: >
+      bash -c "
+        airflow db check || airflow db init && airflow db upgrade &&
+        airflow users create --username admin --password admin123 --firstname Airflow --lastname Admin --role Admin --email admin@example.com || echo 'User already exists'"
+    networks:
+      - trading_network
 
   airflow-webserver:
     build:
@@ -33,8 +63,12 @@ services:
     image: custom-airflow:latest
     container_name: airflow-webserver
     depends_on:
-      - postgres
-      - airflow-init
+      postgres:
+        condition: service_healthy
+      project_postgres:
+        condition: service_started 
+      airflow-init:
+        condition: service_completed_successfully
     env_file:
       - ../configs/secrets.env
     environment:
@@ -49,6 +83,8 @@ services:
       - airflow_plugins:/opt/airflow/plugins
       - ../data:/opt/airflow/data
     command: ["airflow", "webserver"]
+    networks:
+      - trading_network
 
   airflow-scheduler:
     build:
@@ -57,8 +93,12 @@ services:
     image: custom-airflow:latest
     container_name: airflow-scheduler
     depends_on:
-      - postgres
-      - airflow-init
+      postgres:
+        condition: service_healthy
+      project_postgres:
+        condition: service_started
+      airflow-init:
+        condition: service_completed_successfully
     env_file:
       - ../configs/secrets.env
     environment:
@@ -70,8 +110,11 @@ services:
       - airflow_plugins:/opt/airflow/plugins
       - ../data:/opt/airflow/data
     command: ["airflow", "scheduler"]
+    networks:
+      - trading_network
 
 volumes:
   postgres_data:
+  project_data:
   airflow_logs:
   airflow_plugins:
