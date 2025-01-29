@@ -136,6 +136,7 @@ ENV/
 env.bak/
 venv.bak/
 configs/secrets.env
+configs/google-credentials.json
 
 # Spyder project settings
 .spyderproject
@@ -175,3 +176,4 @@ trading_dashboard.code-worspace
 
 # raw data
 data/raw/*
+
