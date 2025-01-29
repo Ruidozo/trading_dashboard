@@ -136,6 +136,7 @@ ENV/
 env.bak/
 venv.bak/
 configs/secrets.env
+configs/*.json
 
 # Spyder project settings
 .spyderproject
@@ -172,3 +173,4 @@ cython_debug/
 .pypirc
 
 trading_dashboard.code-workspace
+
