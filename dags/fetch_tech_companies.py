@@ -126,6 +126,7 @@ with DAG(
     description='Fetch top 500 tech companies and store in PostgreSQL',
     schedule='@monthly',
     start_date=datetime(2023, 1, 1),
+    tags=["finnhub", "fetch companies", "postgres"],
     catchup=False,
 ) as dag:
     

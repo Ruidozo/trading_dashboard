@@ -54,7 +54,7 @@ with DAG(
     default_args=default_args,
     schedule_interval="0 0 * * *",  # Run daily at midnight UTC
     catchup=False,
-    tags=["finnhub", "data_ingestion"],
+    tags=["test"],
 ) as dag:
     
     fetch_stock_task = PythonOperator(
