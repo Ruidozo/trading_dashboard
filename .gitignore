@@ -177,3 +177,19 @@ trading_dashboard.code-worspace
 # raw data
 data/raw/*
 
+
+# Ignore Terraform state files
+terraform.tfstate
+terraform.tfstate.backup
+
+# Ignore Terraform logs and temp files
+.terraform/
+.terraform.lock.hcl
+
+# Ignore any crash logs Terraform might generate
+crash.log
+
+# Ignore any generated plan files
+terraform.tfplan
+
+
