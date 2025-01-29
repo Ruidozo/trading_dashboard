@@ -25,6 +25,7 @@ with DAG(
     dag_id="test_finnhub_api",
     schedule_interval=None,  # Manual trigger
     start_date=datetime(2023, 1, 1),
+    tags=["test"],
     catchup=False,
 ) as dag:
     test_api_task = PythonOperator(

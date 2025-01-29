@@ -17,6 +17,7 @@ with DAG(
     dag_id="test_dependencies",
     start_date=datetime(2023, 1, 1),
     schedule_interval=None,
+    tags=["test"],
     catchup=False,
 ) as dag:
     test_task = PythonOperator(
