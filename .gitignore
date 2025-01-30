@@ -187,3 +187,4 @@ configs/secrets.env
 configs/secrets.env
 .env
 .env
+trading_dashboard.code-workspace
