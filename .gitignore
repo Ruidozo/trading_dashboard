@@ -178,7 +178,9 @@ cython_debug/
 trading_dashboard.code-workspace
 
 configs/secrets.env
+<<<<<<< HEAD
 
 
 #data
 data/
+=======
