@@ -1,3 +1,5 @@
+configs/google_credentials.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -135,8 +137,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+configs/google_credentials.json
 configs/secrets.env
-configs/*.json
 
 # Spyder project settings
 .spyderproject
@@ -174,3 +176,16 @@ cython_debug/
 
 trading_dashboard.code-workspace
 
+
+
+
+#data
+data/
+
+configs/secrets.env
+=======configs/secrets.env
+configs/secrets.env
+.env
+.env
+trading_dashboard.code-workspace
+configs/config.yaml

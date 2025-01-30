@@ -18,6 +18,7 @@ with DAG(
     default_args=default_args,
     start_date=datetime(2023, 1, 1),
     schedule_interval=None,
+    tags=["test"],
     catchup=False,
 ) as dag:
 
