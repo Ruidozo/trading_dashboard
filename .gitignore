@@ -1,4 +1,3 @@
-
 configs/google_credentials.json
 
 # Byte-compiled / optimized / DLL files
@@ -177,10 +176,11 @@ cython_debug/
 
 trading_dashboard.code-workspace
 
-configs/secrets.env
-<<<<<<< HEAD
+
 
 
 #data
 data/
-=======
+
+configs/secrets.env
+=======configs/secrets.env
