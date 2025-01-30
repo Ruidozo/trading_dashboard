@@ -7,8 +7,6 @@ from datetime import datetime, timedelta
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from dag_config import POSTGRES_CONN_ID
 
-
-
 # Set up Airflow logger
 log = logging.getLogger(__name__)
 
