@@ -75,6 +75,8 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       AIRFLOW__WEBSERVER__RBAC: "True"
+      GCS_BUCKET_NAME: trading_dashboard_stock_data
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/google_credentials.json
     ports:
       - "8080:8080"
     volumes:
@@ -82,6 +84,7 @@ services:
       - airflow_logs:/opt/airflow/logs
       - airflow_plugins:/opt/airflow/plugins
       - ../data:/opt/airflow/data
+      - ../configs:/opt/airflow/configs
     command: ["airflow", "webserver"]
     networks:
       - trading_network
