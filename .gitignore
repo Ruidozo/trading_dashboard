@@ -188,3 +188,4 @@ configs/secrets.env
 .env
 .env
 trading_dashboard.code-workspace
+configs/config.yaml
