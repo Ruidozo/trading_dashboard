@@ -26,11 +26,6 @@ COPY requirements.txt /requirements.txt
 # Install Python dependencies
 RUN pip install --no-cache-dir -r /requirements.txt
 
-# Copy the wait-for-it.sh script (ensures services are up before Airflow starts)
-USER root
-COPY wait-for-it.sh /wait-for-it.sh
-RUN chmod +x /wait-for-it.sh
-
 # Switch back to airflow user
 USER airflow
 
