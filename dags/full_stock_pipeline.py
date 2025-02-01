@@ -3,14 +3,15 @@ import json
 import logging
 import time
 import pandas as pd
+import traceback
 from datetime import datetime, timedelta
 from airflow import DAG
-from airflow.operators.python_operator import PythonOperator
+from airflow.operators.python import PythonOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 import finnhub
 
-# ✅ Environment variables for bucket and database connection
+# ✅ Environment variables
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 GCS_BUCKET_PROCESSED = os.getenv("GCS_BUCKET_PROCESSED")
 POSTGRES_CONN_ID = "project_postgres"
@@ -27,6 +28,7 @@ RAW_DATA_DIR = "/opt/airflow/data/raw/"
 
 # ✅ Function to fetch tech company symbols from PostgreSQL
 def fetch_tech_companies():
+    """Fetches tech company symbols from PostgreSQL."""
     pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     conn = pg_hook.get_conn()
     cursor = conn.cursor()
@@ -36,17 +38,19 @@ def fetch_tech_companies():
     conn.close()
     return [company[0] for company in companies]
 
-# ✅ Function to fetch and save stock data as JSON
 def fetch_and_save_stock_data():
+    """Fetches stock data from Finnhub and saves it as JSON."""
+    logging.info("🔄 Starting stock data fetch...")
     companies = fetch_tech_companies()
+
     for symbol in companies:
         try:
             data = finnhub_client.quote(symbol)
-            if not data:
-                logging.warning(f"⚠️ No data for {symbol}")
+
+            if not data or "c" not in data:  
+                logging.warning(f"⚠️ No valid data received for {symbol}. Skipping.")
                 continue
-            
-            # Save JSON
+
             date_path = datetime.utcnow().strftime('%Y/%m/%d')
             full_path = os.path.join(RAW_DATA_DIR, date_path)
             os.makedirs(full_path, exist_ok=True)
@@ -56,12 +60,14 @@ def fetch_and_save_stock_data():
                 json.dump(data, f)
 
             logging.info(f"✅ Data saved: {file_path}")
-            time.sleep(2)  # ✅ Avoid API rate limits
+
+            time.sleep(2)  
 
         except Exception as e:
-            logging.error(f"❌ Error fetching stock data for {symbol}: {e}")
+            logging.error(f"❌ Error fetching stock data for {symbol}: {e}\n{traceback.format_exc()}")
 
-# ✅ Function to upload JSON files to GCS
+    logging.info("🚀 Finished fetching stock data.")
+
 def upload_json_to_gcs():
     gcs_hook = GCSHook(gcp_conn_id="google_cloud_default")
     for root, _, files in os.walk(RAW_DATA_DIR):
@@ -82,7 +88,6 @@ def upload_json_to_gcs():
                 except Exception as e:
                     logging.error(f"❌ Failed to upload {local_file_path}: {e}")
 
-# ✅ Function to process JSON and save as Parquet
 def process_json_to_parquet():
     gcs_hook = GCSHook(gcp_conn_id="google_cloud_default")
     today = datetime.utcnow().strftime('%Y/%m/%d')
@@ -98,7 +103,6 @@ def process_json_to_parquet():
             json_data = gcs_hook.download(bucket_name=GCS_BUCKET_NAME, object_name=file)
             json_content = json.loads(json_data.decode('utf-8'))
 
-            # Extract stock symbol
             symbol = file.split("/")[-1].split("_")[0]
             json_content["symbol"] = symbol
             json_content["date"] = datetime.utcnow().strftime('%Y-%m-%d')
@@ -123,7 +127,6 @@ def process_json_to_parquet():
         os.remove(local_parquet_path)
         logging.info(f"✅ Parquet saved and uploaded: {parquet_filename}")
 
-# ✅ Function to load Parquet data from GCS to PostgreSQL
 def load_parquet_to_postgres():
     gcs_hook = GCSHook(gcp_conn_id="google_cloud_default")
     today = datetime.utcnow()
@@ -133,34 +136,70 @@ def load_parquet_to_postgres():
     local_parquet_path = f"/tmp/{parquet_filename}"
 
     try:
+        # ✅ Download Parquet from GCS
         gcs_hook.download(bucket_name=GCS_BUCKET_PROCESSED, object_name=gcs_parquet_path, filename=local_parquet_path)
         df = pd.read_parquet(local_parquet_path, engine="pyarrow")
+
+        # ✅ Rename columns to match PostgreSQL schema
+        column_mapping = {
+            "c": "c",    # Current price
+            "d": "d",    # Change in price
+            "dp": "dp",  # Percentage change
+            "h": "h",    # High price
+            "l": "l",    # Low price
+            "o": "o",    # Open price
+            "pc": "pc",  # Previous close price
+            "t": "t",    # Timestamp
+            "symbol": "symbol",
+            "date": "date",
+        }
+        df.rename(columns=column_mapping, inplace=True)
+
+        # ✅ Ensure column order matches PostgreSQL
+        expected_columns = ["symbol", "date", "c", "d", "dp", "h", "l", "o", "pc", "t"]
+        df = df[expected_columns]
+
+        # ✅ Convert `date` to proper format
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+
+        # ✅ Convert data types for PostgreSQL compatibility
+        df["c"] = df["c"].astype(float)
+        df["h"] = df["h"].astype(float)
+        df["l"] = df["l"].astype(float)
+        df["o"] = df["o"].astype(float)
+        df["pc"] = df["pc"].astype(float)
+        df["t"] = df["t"].astype(int)  # Ensure it's BIGINT compatible
+
+        # ✅ Insert data into PostgreSQL
         pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
         engine = pg_hook.get_sqlalchemy_engine()
 
         with engine.begin() as conn:
             df.to_sql("daily_stock_data", conn, if_exists="append", index=False)
-            logging.info(f"📥 Inserted {df.shape[0]} rows into PostgreSQL.")
+
+        logging.info(f"📥 Inserted {df.shape[0]} rows into PostgreSQL.")
 
         os.remove(local_parquet_path)
 
     except Exception as e:
         logging.error(f"❌ Error loading Parquet to PostgreSQL: {e}")
 
-# ✅ Define the unified DAG
+
+# ✅ Define DAG with constraints
 default_args = {
     "owner": "airflow",
-    "depends_on_past": False,
+    "depends_on_past": False,  
     "start_date": datetime(2025, 1, 2),
-    "retries": 1,
+    "retries": 3,  
     "retry_delay": timedelta(minutes=5),
 }
 
 with DAG(
     dag_id="full_stock_pipeline",
     default_args=default_args,
-    schedule_interval="0 0 * * *",  # ✅ Runs daily at midnight
-    catchup=False,
+    schedule_interval="0 0 * * *",  # Runs daily at midnight
+    catchup=False,  
+    max_active_runs=1,  # ✅ Ensures only one run at a time
     tags=["finnhub", "data_ingestion", "gcs", "postgres"],
 ) as dag:
 

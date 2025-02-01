@@ -189,3 +189,4 @@ configs/secrets.env
 .env
 trading_dashboard.code-workspace
 configs/config.yaml
+terraform/.terraform/

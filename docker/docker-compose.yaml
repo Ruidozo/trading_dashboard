@@ -95,6 +95,10 @@ services:
       - trading_network
 
   airflow-scheduler:
+    deploy:
+      resources:
+        limits:
+          memory: 2g
     build:
       context: .
       dockerfile: ./Dockerfile
