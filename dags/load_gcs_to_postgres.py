@@ -13,50 +13,45 @@ GCS_BUCKET_PROCESSED = os.getenv("GCS_BUCKET_PROCESSED")
 if not GCS_BUCKET_PROCESSED:
     raise ValueError("🚨 GCS_BUCKET_PROCESSED is not set in the environment.")
 
+# ✅ Get PostgreSQL connection ID from environment
+POSTGRES_CONN_ID = "project_postgres"
+
 def load_parquet_to_postgres():
-    """Download the latest daily Parquet file from GCS and insert data into PostgreSQL."""
     gcs_hook = GCSHook(gcp_conn_id="google_cloud_default")
-
-    # ✅ Get today's date
     today = datetime.utcnow()
-    year, month, day = today.strftime('%Y'), today.strftime('%m'), today.strftime('%d')
-
-    # ✅ Path to the latest daily Parquet file
-    monthly_folder = f"{year}/{month}/"
-    parquet_filename = f"daily_stocks_{year}-{month}-{day}.parquet"
-    gcs_parquet_path = f"{monthly_folder}{parquet_filename}"
-
-    logging.info(f"🔍 Checking GCS path: gs://{GCS_BUCKET_PROCESSED}/{gcs_parquet_path}")
-
-    # ✅ Download the Parquet file from GCS
+    year_month = today.strftime('%Y/%m')
+    parquet_filename = f"daily_stocks_{today.strftime('%Y-%m-%d')}.parquet"
+    gcs_parquet_path = f"{year_month}/{parquet_filename}"
     local_parquet_path = f"/tmp/{parquet_filename}"
+
     try:
+        # ✅ Download Parquet from GCS
         gcs_hook.download(bucket_name=GCS_BUCKET_PROCESSED, object_name=gcs_parquet_path, filename=local_parquet_path)
-        logging.info(f"✅ Downloaded {gcs_parquet_path} from GCS.")
-    except Exception as e:
-        logging.error(f"❌ No file found for today: {e}")
-        return
-
-    # ✅ Read Parquet into DataFrame
-    try:
         df = pd.read_parquet(local_parquet_path, engine="pyarrow")
-        logging.info(f"✅ Loaded {df.shape[0]} rows from {parquet_filename}")
-    except Exception as e:
-        logging.error(f"❌ Failed to read Parquet file: {e}")
-        return
 
-    # ✅ Connect to PostgreSQL
-    pg_hook = PostgresHook(postgres_conn_id="project_postgres")
-    engine = pg_hook.get_sqlalchemy_engine()
+        # ✅ Ensure column order & rename for PostgreSQL compatibility
+        expected_columns = ["symbol", "date", "c", "d", "dp", "h", "l", "o", "pc", "t"]
+        df = df[expected_columns]
+        df["date"] = pd.to_datetime(df["date"]).dt.date  # Ensure proper date format
 
-    # ✅ Insert DataFrame into PostgreSQL
-    try:
+        # ✅ Convert types to match PostgreSQL schema
+        df = df.astype({
+            "c": float, "h": float, "l": float, "o": float, "pc": float,
+            "t": int  # Ensure `t` is stored as BIGINT in PostgreSQL
+        })
+
+        # ✅ Insert data into `staging_stock_data` (Replace existing daily batch)
+        pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+        engine = pg_hook.get_sqlalchemy_engine()
+
         with engine.begin() as conn:
-            df.to_sql("daily_stock_data", conn, if_exists="append", index=False)
-            logging.info(f"📥 Inserted {df.shape[0]} rows into PostgreSQL.")
+            df.to_sql("staging_stock_data", conn, if_exists="replace", index=False)
+
+        logging.info(f"📥 Replaced staging table with {df.shape[0]} rows.")
+
+
     except Exception as e:
-        logging.error(f"❌ Error inserting data into PostgreSQL: {e}")
-        return
+        logging.error(f"❌ Error loading Parquet to PostgreSQL: {e}")
 
     # ✅ Cleanup local file
     os.remove(local_parquet_path)

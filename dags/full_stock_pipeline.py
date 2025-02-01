@@ -140,49 +140,31 @@ def load_parquet_to_postgres():
         gcs_hook.download(bucket_name=GCS_BUCKET_PROCESSED, object_name=gcs_parquet_path, filename=local_parquet_path)
         df = pd.read_parquet(local_parquet_path, engine="pyarrow")
 
-        # ✅ Rename columns to match PostgreSQL schema
-        column_mapping = {
-            "c": "c",    # Current price
-            "d": "d",    # Change in price
-            "dp": "dp",  # Percentage change
-            "h": "h",    # High price
-            "l": "l",    # Low price
-            "o": "o",    # Open price
-            "pc": "pc",  # Previous close price
-            "t": "t",    # Timestamp
-            "symbol": "symbol",
-            "date": "date",
-        }
-        df.rename(columns=column_mapping, inplace=True)
-
-        # ✅ Ensure column order matches PostgreSQL
+        # ✅ Ensure column order & rename for PostgreSQL compatibility
         expected_columns = ["symbol", "date", "c", "d", "dp", "h", "l", "o", "pc", "t"]
         df = df[expected_columns]
+        df["date"] = pd.to_datetime(df["date"]).dt.date  # Ensure proper date format
 
-        # ✅ Convert `date` to proper format
-        df["date"] = pd.to_datetime(df["date"]).dt.date
+        # ✅ Convert types to match PostgreSQL schema
+        df = df.astype({
+            "c": float, "h": float, "l": float, "o": float, "pc": float,
+            "t": int  # Ensure `t` is stored as BIGINT in PostgreSQL
+        })
 
-        # ✅ Convert data types for PostgreSQL compatibility
-        df["c"] = df["c"].astype(float)
-        df["h"] = df["h"].astype(float)
-        df["l"] = df["l"].astype(float)
-        df["o"] = df["o"].astype(float)
-        df["pc"] = df["pc"].astype(float)
-        df["t"] = df["t"].astype(int)  # Ensure it's BIGINT compatible
-
-        # ✅ Insert data into PostgreSQL
+        # ✅ Insert data into `staging_stock_data` (Replace existing daily batch)
         pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
         engine = pg_hook.get_sqlalchemy_engine()
 
         with engine.begin() as conn:
-            df.to_sql("daily_stock_data", conn, if_exists="append", index=False)
+            df.to_sql("staging_stock_data", conn, if_exists="replace", index=False)
 
-        logging.info(f"📥 Inserted {df.shape[0]} rows into PostgreSQL.")
+        logging.info(f"📥 Replaced staging table with {df.shape[0]} rows.")
 
         os.remove(local_parquet_path)
 
     except Exception as e:
         logging.error(f"❌ Error loading Parquet to PostgreSQL: {e}")
+
 
 
 # ✅ Define DAG with constraints
