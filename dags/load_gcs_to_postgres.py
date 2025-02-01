@@ -49,13 +49,10 @@ def load_parquet_to_postgres():
 
         logging.info(f"📥 Replaced staging table with {df.shape[0]} rows.")
 
+        os.remove(local_parquet_path)
 
     except Exception as e:
         logging.error(f"❌ Error loading Parquet to PostgreSQL: {e}")
-
-    # ✅ Cleanup local file
-    os.remove(local_parquet_path)
-    logging.info(f"🗑️ Deleted local file: {local_parquet_path}")
 
 # ✅ Define Airflow DAG
 default_args = {
@@ -69,7 +66,6 @@ default_args = {
 with DAG(
     dag_id="load_gcs_to_postgres",
     default_args=default_args,
-    schedule_interval="0 3 * * *",  # Run daily at 3 AM UTC (after `process_gcs_json`)
     catchup=False,
     tags=["postgres", "data_load"],
 ) as dag:

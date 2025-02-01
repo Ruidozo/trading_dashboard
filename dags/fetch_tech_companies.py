@@ -1,141 +1,125 @@
+import os
 import logging
+import pandas as pd
+import requests
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-import os
-import finnhub
 from datetime import datetime, timedelta
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from dag_config import POSTGRES_CONN_ID
 
-# Set up Airflow logger
+# Logger setup
 log = logging.getLogger(__name__)
 
-def fetch_tech_companies():
-    """Fetch top tech companies from Finnhub and store in PostgreSQL."""
-    api_key = os.getenv("FINNHUB_API_KEY")
-    if not api_key:
-        log.error("❌ FINNHUB_API_KEY is not set in the environment.")
-        raise ValueError("❌ FINNHUB_API_KEY is not set in the environment.")
+# CSV URL
+CSV_URL = "https://companiesmarketcap.com/tech/largest-tech-companies-by-market-cap/?download=csv"
+CSV_FILE_PATH = "/opt/airflow/data/tech_companies.csv"
 
-    client = finnhub.Client(api_key=api_key)
-    companies = client.stock_symbols('US')
+def download_tech_companies_csv():
+    """Download the latest top tech companies by market cap and save locally."""
+    log.info("📥 Downloading latest tech companies CSV...")
+    response = requests.get(CSV_URL)
+    
+    if response.status_code == 200:
+        with open(CSV_FILE_PATH, "wb") as file:
+            file.write(response.content)
+        log.info("✅ CSV Downloaded successfully!")
+    else:
+        log.error(f"❌ Failed to download CSV. Status code: {response.status_code}")
+        raise Exception("Failed to download CSV")
 
-    # Log only the count, not full data
-    log.info("✅ Fetched %d total stocks from Finnhub API.", len(companies))
+def process_tech_companies():
+    """Creates a new PostgreSQL table exactly matching the CSV structure and filters out unsupported symbols."""
+    log.info("📊 Processing tech companies CSV...")
 
-    if not companies:
-        log.error("❌ Finnhub API returned no stock symbols!")
-        raise ValueError("❌ Finnhub API returned no stock symbols!")
+    # Read CSV
+    df = pd.read_csv(CSV_FILE_PATH)
 
-    # Filter only tech companies
-    tech_companies = [
-        company for company in companies
-        if company.get('description') and any(word in company['description'].lower() for word in ['tech', 'software', 'semiconductor', 'computer', 'digital'])
-    ]
+    # Ensure correct column names
+    expected_columns = ['Rank', 'Name', 'Symbol', 'marketcap', 'price (USD)', 'country']
+    if not all(col in df.columns for col in expected_columns):
+        log.error(f"❌ Unexpected CSV format! Columns found: {df.columns}")
+        raise Exception("CSV format mismatch")
 
-    # Log summary instead of full data
-    log.info("✅ Found %d tech companies.", len(tech_companies))
-    if tech_companies:
-        log.info("Example tech company: %s", tech_companies[0])  # Show only one
+    # Rename columns for consistency
+    df.columns = ['rank', 'name', 'symbol', 'market_cap', 'price_usd', 'country']
 
-    return tech_companies
+    # Drop rows where `symbol` is missing
+    df = df.dropna(subset=['symbol'])
 
-# Airflow DAG
+    # Convert `symbol` to string to avoid issues with NaN values
+    df['symbol'] = df['symbol'].astype(str)
+
+    # Convert market capitalization to numeric
+    df['market_cap'] = df['market_cap'].replace('[\$,]', '', regex=True).astype(float)
+    df['price_usd'] = df['price_usd'].replace('[\$,]', '', regex=True).astype(float)
+
+    # ✅ Filter: Keep only symbols that Finnhub supports (only uppercase letters, no numbers, no ".KS" etc.)
+    df = df[df['symbol'].str.match(r'^[A-Z]+$', na=False)]  # Ensures no NaN values
+
+    log.info(f"✅ Filtered tech companies: {len(df)} remain after removing unsupported symbols.")
+
+    # Store in PostgreSQL
+    pg_hook = PostgresHook(postgres_conn_id="project_postgres")
+    conn = pg_hook.get_conn()
+    cursor = conn.cursor()
+
+    # Drop old table and create a new one
+    create_table_query = """
+    DROP TABLE IF EXISTS tech_companies;
+    CREATE TABLE tech_companies (
+        rank INT PRIMARY KEY,
+        name TEXT,
+        symbol TEXT UNIQUE,
+        market_cap NUMERIC,
+        price_usd NUMERIC,
+        country TEXT
+    );
+    """
+    cursor.execute(create_table_query)
+
+    # Insert data into PostgreSQL
+    for _, row in df.iterrows():
+        cursor.execute("""
+            INSERT INTO tech_companies (rank, name, symbol, market_cap, price_usd, country)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (symbol) DO UPDATE SET
+            name = EXCLUDED.name,
+            market_cap = EXCLUDED.market_cap,
+            price_usd = EXCLUDED.price_usd,
+            country = EXCLUDED.country;
+        """, (row['rank'], row['name'], row['symbol'], row['market_cap'], row['price_usd'], row['country']))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    log.info("✅ Stored filtered tech companies in PostgreSQL!")
+
+# DAG definition
 default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'email_on_failure': False,
-    'email_on_retry': False,
-    'retries': 1,
-    'retry_delay': timedelta(minutes=5),
+    "owner": "airflow",
+    "depends_on_past": False,
+    "retries": 3,
+    "retry_delay": timedelta(minutes=5),
 }
 
 with DAG(
-    'fetch_tech_companies',
+    "fetch_tech_companies_csv",
     default_args=default_args,
-    description='Fetch top 500 tech companies and store in PostgreSQL',
-    schedule='@monthly',
-    start_date=datetime(2023, 1, 1),
+    description="Download and process top 500 tech companies by market cap",
+    schedule_interval="@daily",  # Runs daily
+    start_date=datetime(2025, 1, 1),
     catchup=False,
 ) as dag:
-    
-    fetch_tech_companies_task = PythonOperator(
-        task_id='fetch_tech_companies_task',
-        python_callable=fetch_tech_companies,
+
+    download_task = PythonOperator(
+        task_id="download_tech_companies_csv",
+        python_callable=download_tech_companies_csv,
     )
 
-
-
-def store_tech_companies_in_postgres(**context):
-    tech_companies = context['task_instance'].xcom_pull(task_ids='fetch_tech_companies_task')
-    
-    if not tech_companies:
-        log.warning("⚠️ No tech companies fetched. Skipping storage task.")
-        return
-
-    log.info(f"📌 Storing {len(tech_companies)} tech companies in PostgreSQL.")
-
-    try:
-        pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
-        conn = pg_hook.get_conn()
-        cursor = conn.cursor()
-        
-        # Ensure table exists
-        create_table_query = """
-        CREATE TABLE IF NOT EXISTS tech_companies (
-            symbol VARCHAR PRIMARY KEY,
-            name VARCHAR,
-            finnhubIndustry VARCHAR
-        );
-        """
-        cursor.execute(create_table_query)
-
-        for company in tech_companies:
-            log.info(f"📝 Inserting company: {company.get('symbol', '')} - {company.get('description', '')}")
-            cursor.execute("""
-                INSERT INTO tech_companies (symbol, name, finnhubIndustry)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (symbol) DO UPDATE SET
-                name = EXCLUDED.name,
-                finnhubIndustry = EXCLUDED.finnhubIndustry;
-            """, (company.get('symbol', ''), company.get('description', ''), company.get('finnhubIndustry', '')))
-
-        conn.commit()
-        cursor.close()
-        conn.close()
-
-        log.info("✅ Successfully inserted tech companies into PostgreSQL.")
-    except Exception as e:
-        log.error(f"❌ Error inserting data into PostgreSQL: {e}")
-        raise
-
-default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'email_on_failure': False,
-    'email_on_retry': False,
-    'retries': 1,
-    'retry_delay': timedelta(minutes=5),
-}
-
-with DAG(
-    'fetch_tech_companies',
-    default_args=default_args,
-    description='Fetch top 500 tech companies and store in PostgreSQL',
-    schedule='@monthly',
-    start_date=datetime(2023, 1, 1),
-    tags=["finnhub", "fetch companies", "postgres"],
-    catchup=False,
-) as dag:
-    
-    fetch_tech_companies_task = PythonOperator(
-        task_id='fetch_tech_companies_task',
-        python_callable=fetch_tech_companies,
+    process_task = PythonOperator(
+        task_id="process_tech_companies",
+        python_callable=process_tech_companies,
     )
-    
-    store_tech_companies_task = PythonOperator(
-        task_id='store_tech_companies_task',
-        python_callable=store_tech_companies_in_postgres,
-    )
-    
-    fetch_tech_companies_task >> store_tech_companies_task
+
+    download_task >> process_task  # DAG sequence

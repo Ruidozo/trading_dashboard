@@ -51,10 +51,6 @@ def fetch_and_save_stock_data():
                 logging.warning(f"⚠️ No valid data received for {symbol}. Skipping.")
                 continue
 
-            # ✅ Ensure `v` is included
-            if "v" not in data:
-                data["v"] = 0  # Default to 0 if missing
-
             date_path = datetime.utcnow().strftime('%Y/%m/%d')
             full_path = os.path.join(RAW_DATA_DIR, date_path)
             os.makedirs(full_path, exist_ok=True)
@@ -71,7 +67,6 @@ def fetch_and_save_stock_data():
             logging.error(f"❌ Error fetching stock data for {symbol}: {e}\n{traceback.format_exc()}")
 
     logging.info("🚀 Finished fetching stock data.")
-
 
 def upload_json_to_gcs():
     gcs_hook = GCSHook(gcp_conn_id="google_cloud_default")
@@ -146,14 +141,14 @@ def load_parquet_to_postgres():
         df = pd.read_parquet(local_parquet_path, engine="pyarrow")
 
         # ✅ Ensure column order & rename for PostgreSQL compatibility
-        expected_columns = ["symbol", "date", "c", "d", "dp", "h", "l", "o", "pc", "t", "v"]
+        expected_columns = ["symbol", "date", "c", "d", "dp", "h", "l", "o", "pc", "t"]
         df = df[expected_columns]
         df["date"] = pd.to_datetime(df["date"]).dt.date  # Ensure proper date format
 
         # ✅ Convert types to match PostgreSQL schema
         df = df.astype({
             "c": float, "h": float, "l": float, "o": float, "pc": float,
-            "t": int, "v":int  
+            "t": int  # Ensure `t` is stored as BIGINT in PostgreSQL
         })
 
         # ✅ Insert data into `staging_stock_data` (Replace existing daily batch)
@@ -184,12 +179,11 @@ default_args = {
 with DAG(
     dag_id="full_stock_pipeline",
     default_args=default_args,
-    schedule_interval="10 0 * * 1-5",  # ✅ Runs daily at 00:10 UTC
-    catchup=False,
-    max_active_runs=1,
+    schedule_interval="0 0 * * *",  # Runs daily at midnight
+    catchup=False,  
+    max_active_runs=1,  # ✅ Ensures only one run at a time
     tags=["finnhub", "data_ingestion", "gcs", "postgres"],
 ) as dag:
-
 
     fetch_stock_task = PythonOperator(
         task_id="fetch_and_save_stock_data",
