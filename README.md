@@ -6,7 +6,7 @@ The development process focuses on **local testing** and eventual deployment to 
 
 #### **Project Objectives**
 1. **Data Ingestion**: 
-   - Schedule and automate daily data collection from the PredictIt API using Airflow.
+   - Schedule and automate daily data collection from the Finnhub API using Airflow.
    - Save raw data in Google Cloud Storage (GCS) for storage and processing.
 
 2. **Data Processing**:
@@ -34,7 +34,7 @@ The development process focuses on **local testing** and eventual deployment to 
 - **Data Processing**: Python, Pandas, SQLAlchemy.
 - **Visualization**: Streamlit or Dash for the dashboard.
 - **Infrastructure Management**: Terraform for GCP resource provisioning.
-- **APIs**: PredictIt API for trading data, Bing News Search for news enrichment.
+- **APIs**: Finnhub API for trading data, Bing News Search for news enrichment.
 
 #### **Key Highlights**
 This project is designed to be an end-to-end solution for ingesting, analyzing, and presenting trading data insights without incurring any costs. It leverages free-tier cloud resources and modern data tools, making it an excellent demonstration of scalable, real-world data engineering practices.
