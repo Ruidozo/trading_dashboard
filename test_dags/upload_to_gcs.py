@@ -3,8 +3,8 @@ import logging
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
-from google.cloud import storage
-from dotenv import load_dotenv
+from airflow.providers.google.cloud.hooks.gcs import GCSHook
+
 
 # Define the path to the local JSON files
 LOCAL_JSON_PATH = "/opt/airflow/data/raw/"
@@ -14,11 +14,11 @@ GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 if not GCS_BUCKET_NAME:
     raise ValueError("GCS_BUCKET_NAME is not set in the environment.")
 
-# Initialize GCS client
-storage_client = storage.Client()
-
+ # Upload Function
 def upload_to_gcs():
     """Upload local JSON files to Google Cloud Storage and delete them locally."""
+    gcs_hook = GCSHook()
+
     for root, _, files in os.walk(LOCAL_JSON_PATH):
         for file in files:
             if file.endswith(".json"):
@@ -26,9 +26,11 @@ def upload_to_gcs():
                 gcs_file_path = os.path.relpath(local_file_path, LOCAL_JSON_PATH)
 
                 try:
-                    bucket = storage_client.bucket(GCS_BUCKET_NAME)
-                    blob = bucket.blob(gcs_file_path)
-                    blob.upload_from_filename(local_file_path)
+                    gcs_hook.upload(
+                        bucket_name=GCS_BUCKET_NAME,
+                        object_name=gcs_file_path,
+                        filename=local_file_path
+                    )
                     logging.info(f"✅ Successfully uploaded {local_file_path} to gs://{GCS_BUCKET_NAME}/{gcs_file_path}")
 
                     # Delete the local file after successful upload
@@ -37,6 +39,7 @@ def upload_to_gcs():
 
                 except Exception as e:
                     logging.error(f"❌ Failed to upload {local_file_path} to GCS: {e}")
+                    raise  # Ensure failure triggers Slack alert
 
 # Define the Airflow DAG
 default_args = {

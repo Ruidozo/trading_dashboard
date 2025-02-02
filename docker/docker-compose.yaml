@@ -49,6 +49,11 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/google_credentials.json
+    volumes:
+      - ../configs:/opt/airflow/configs
+      - ../dags:/opt/airflow/dags
+      - ../data:/opt/airflow/data
     command: >
       bash -c "
         airflow db check || airflow db init && airflow db upgrade &&
@@ -90,6 +95,10 @@ services:
       - trading_network
 
   airflow-scheduler:
+    deploy:
+      resources:
+        limits:
+          memory: 2g
     build:
       context: .
       dockerfile: ./Dockerfile
@@ -107,7 +116,9 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/google_credentials.json
     volumes:
+      - ../configs:/opt/airflow/configs
       - ../dags:/opt/airflow/dags
       - airflow_logs:/opt/airflow/logs
       - airflow_plugins:/opt/airflow/plugins

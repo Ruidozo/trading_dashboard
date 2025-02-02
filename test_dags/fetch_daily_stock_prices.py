@@ -72,13 +72,13 @@ def fetch_and_save_all_stock_data():
         # Introduce delay after every request to avoid API rate limits
         if processed_count % 1 == 0:  # Every request
             logging.info(f"⏳ Processed {processed_count}/{len(companies)}. Sleeping for 1 sec to prevent hitting API rate limits.")
-            time.sleep(1)  # Wait 1 second before next request
+            time.sleep(1,5)  # Wait 1,5 second before next request
 
 # Define the Airflow DAG
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
-    "start_date": datetime(2024, 1, 1),
+    "start_date": datetime(2025, 2, 1),
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
