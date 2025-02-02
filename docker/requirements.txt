@@ -4,3 +4,5 @@ requests
 psycopg2-binary
 apache-airflow-providers-postgres
 finnhub-python
+streamlit
+yfinance
