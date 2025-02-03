@@ -1,6 +1,8 @@
 import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
+import streamlit as st
+
 
 # Database connection string (Docker hostname)
 DB_URI = "postgresql://odiurdigital:dashboard@project_postgres:5432/project_db"
@@ -11,8 +13,9 @@ def get_db_connection():
         engine = create_engine(DB_URI)
         return engine
     except SQLAlchemyError as e:
-        print(f"❌ Database connection failed: {e}")
+        st.error(f"❌ Database connection failed: {e}")  # ✅ Show error inside Streamlit
         return None
+
 
 def load_company_list():
     """Fetch a distinct list of companies, ordered by market cap rank."""
@@ -53,26 +56,13 @@ def load_stock_data(company_name=None, start_date=None, end_date=None, limit=100
     
     query += f" ORDER BY trade_date DESC LIMIT {limit}"
 
+    print(f"🔍 Running Query: {query}")  # ✅ Print the query for debugging
     df = pd.read_sql(query, engine)
     engine.dispose()
+
+    print(f"📊 Query Returned {len(df)} rows")  # ✅ Show how many rows are returned
     return df
 
-def load_latest_trade(company_name):
-    """Fetches the latest stock trade for a given company."""
-    engine = get_db_connection()
-    if not engine:
-        return pd.DataFrame()
-
-    query = f"""
-    SELECT trade_date, opening_price, highest_price, lowest_price, closing_price, traded_volume
-    FROM stock_price_history
-    WHERE company_name = '{company_name}'
-    ORDER BY trade_date DESC LIMIT 1
-    """
-
-    df = pd.read_sql(query, engine)
-    engine.dispose()
-    return df
 
 def load_high_volatility_patterns():
     """Fetch high volatility trading patterns."""

@@ -5,4 +5,7 @@ psycopg2-binary
 apache-airflow-providers-postgres
 finnhub-python
 streamlit
+yahooquery
 yfinance
+nltk
+scikit-learn
