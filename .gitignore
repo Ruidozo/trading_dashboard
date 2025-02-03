@@ -189,4 +189,6 @@ configs/secrets.env
 .env
 trading_dashboard.code-workspace
 configs/config.yaml
-terraform/.terraform/configs/airflow_connections.json
+terraform/.terraform/
+configs/airflow_connections.json
+
