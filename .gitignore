@@ -128,3 +128,10 @@ data/
 
 # macOS system files
 .DS_Store
+
+
+# test files
+tests/
+test_dags/
+notbooks/
+
