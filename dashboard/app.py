@@ -31,7 +31,7 @@ if selected_page == "Company Insights":
         selected_company = next((c for c in company_options if c["dropdown_label"] == selected_label), None)
 
         st.sidebar.header("Select Date Range")
-        start_date = st.sidebar.date_input("Start Date", date.today().replace(day=1))
+        start_date = st.sidebar.date_input("Start Date", date.today().replace(day=1) - pd.DateOffset(days=90))
         end_date = st.sidebar.date_input("End Date", date.today())
 
         if start_date > end_date:
