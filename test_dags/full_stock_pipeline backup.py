@@ -10,19 +10,22 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.slack.operators.slack_webhook import SlackWebhookOperator
-import yfinance as yf
+import finnhub
 
 # ✅ Environment variables
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 GCS_BUCKET_PROCESSED = os.getenv("GCS_BUCKET_PROCESSED")
 POSTGRES_CONN_ID = "project_postgres"
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 
-
-if not all([GCS_BUCKET_NAME, GCS_BUCKET_PROCESSED]):
+if not all([GCS_BUCKET_NAME, GCS_BUCKET_PROCESSED, FINNHUB_API_KEY]):
     raise ValueError("🚨 One or more required environment variables are missing.")
 
 # Configure logging
 log = logging.getLogger(__name__)
+
+# ✅ Initialize Finnhub client
+finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
 
 # ✅ Define local raw data storage path
 RAW_DATA_DIR = "/opt/airflow/data/raw/"
@@ -41,40 +44,24 @@ def fetch_tech_companies():
 
 # ✅ Fetch and Save Stock Data
 def fetch_and_save_stock_data():
-    """Fetches stock data from Yahoo Finance and saves it as JSON."""
+    """Fetches stock data from Finnhub and saves it as JSON."""
     logging.info("🔄 Starting stock data fetch...")
-    pg_hook = PostgresHook(postgres_conn_id="project_postgres")
-    conn = pg_hook.get_conn()
-    cursor = conn.cursor()
-    cursor.execute("SELECT symbol FROM tech_companies")
-    companies = [row[0] for row in cursor.fetchall()]
-    cursor.close()
-    conn.close()
+    companies = fetch_tech_companies()
 
     for symbol in companies:
         try:
-            stock = yf.Ticker(symbol)
-            hist = stock.history(period="1d", interval="1d")  # ✅ This gets only the last available day's data
+            data = finnhub_client.quote(symbol)
 
-            if hist.empty:
+            if not data or "c" not in data:
                 logging.warning(f"⚠️ No valid data received for {symbol}. Skipping.")
                 continue
 
-            hist.reset_index(inplace=True)
-            hist.rename(columns={
-                "Date": "trade_date",
-                "Open": "opening_price",
-                "High": "highest_price",
-                "Low": "lowest_price",
-                "Close": "closing_price",
-                "Volume": "traded_volume",
-            }, inplace=True)
-
-            data = hist.to_dict(orient="records")
-            data = [{**row, "trade_date": row["trade_date"].strftime("%Y-%m-%d")} for row in data]
+            # ✅ Ensure `v` is included
+            if "v" not in data:
+                data["v"] = 0
 
             date_path = datetime.utcnow().strftime('%Y/%m/%d')
-            full_path = os.path.join("/opt/airflow/data/raw/", date_path)
+            full_path = os.path.join(RAW_DATA_DIR, date_path)
             os.makedirs(full_path, exist_ok=True)
 
             file_path = os.path.join(full_path, f"{symbol}_{datetime.utcnow().strftime('%Y%m%d')}.json")
@@ -82,10 +69,10 @@ def fetch_and_save_stock_data():
                 json.dump(data, f)
 
             logging.info(f"✅ Data saved: {file_path}")
-            time.sleep(0)
+            time.sleep(2)
 
         except Exception as e:
-            logging.error(f"❌ Error fetching stock data for {symbol}: {e}")
+            logging.error(f"❌ Error fetching stock data for {symbol}: {e}\n{traceback.format_exc()}")
     
     logging.info("🚀 Finished fetching stock data.")
 
@@ -124,29 +111,13 @@ def process_json_to_parquet():
     for file in files:
         try:
             json_data = gcs_hook.download(bucket_name=GCS_BUCKET_NAME, object_name=file)
-            json_content = json.loads(json_data.decode('utf-8'))  # Load JSON
-            
-            # Ensure json_content is a list, as your JSON files contain lists of stock data
-            if not isinstance(json_content, list):
-                logging.error(f"❌ Unexpected JSON structure in {file}")
-                continue  # Skip this file
-            
+            json_content = json.loads(json_data.decode('utf-8'))
+
             symbol = file.split("/")[-1].split("_")[0]
-            target_date = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')  # ✅ Correct: Look for yesterday's data
+            json_content["symbol"] = symbol
+            json_content["date"] = datetime.utcnow().strftime('%Y-%m-%d')
 
-            # Extract only the record for the target date
-            filtered_data = [entry for entry in json_content if entry["trade_date"] == target_date]
-
-            if not filtered_data:
-                logging.warning(f"⚠️ No matching stock data found for {target_date} in {file}")
-                continue  # Skip if no data for today
-
-            # Append additional metadata
-            for entry in filtered_data:
-                entry["symbol"] = symbol
-                entry["date"] = target_date
-
-            all_data.extend(filtered_data)
+            all_data.append(json_content)
 
         except Exception as e:
             logging.error(f"❌ Error processing {file}: {e}")
@@ -166,7 +137,6 @@ def process_json_to_parquet():
         os.remove(local_parquet_path)
         logging.info(f"✅ Parquet saved and uploaded: {parquet_filename}")
 
-
 # ✅ Load Parquet to PostgreSQL
 def load_parquet_to_postgres():
     gcs_hook = GCSHook(gcp_conn_id="google_cloud_default")
@@ -177,109 +147,34 @@ def load_parquet_to_postgres():
     local_parquet_path = f"/tmp/{parquet_filename}"
 
     try:
-        # ✅ Step 1: Download Parquet from GCS
-        logging.info(f"📥 Downloading Parquet from GCS: {gcs_parquet_path}")
+        # ✅ Download Parquet from GCS
         gcs_hook.download(bucket_name=GCS_BUCKET_PROCESSED, object_name=gcs_parquet_path, filename=local_parquet_path)
-
-        # ✅ Step 2: Load Parquet File into DataFrame
-        logging.info(f"📂 Attempting to load Parquet file: {local_parquet_path}")
         df = pd.read_parquet(local_parquet_path, engine="pyarrow")
 
-        # ✅ Step 3: Check if DataFrame is Empty
-        if df.empty:
-            logging.error("❌ DataFrame is EMPTY after reading Parquet file! Aborting insert.")
-            return
+        # ✅ Ensure column order & rename for PostgreSQL compatibility
+        expected_columns = ["symbol", "date", "c", "d", "dp", "h", "l", "o", "pc", "t", "v"]
+        df = df[expected_columns]
+        df["date"] = pd.to_datetime(df["date"]).dt.date  # Ensure proper date format
 
-        logging.info(f"📊 Loaded Parquet DataFrame with {df.shape[0]} rows")
-        logging.info(df.head())
-
-        # ✅ Step 4: Drop duplicate 'date' column if it exists
-        if "date" in df.columns:
-            df = df.loc[:, ~df.columns.duplicated()].copy()
-
-        # ✅ Step 5: Rename 'trade_date' to 'date' for consistency
-        df.rename(columns={"trade_date": "date"}, inplace=True)
-
-        # ✅ Step 6: Rename other columns to match PostgreSQL schema
-        rename_mapping = {
-            "opening_price": "o",
-            "highest_price": "h",
-            "lowest_price": "l",
-            "closing_price": "c",
-            "traded_volume": "v",
-            "Dividends": "d",
-            "Stock Splits": "dp"
-        }
-        df.rename(columns=rename_mapping, inplace=True)
-
-        # ✅ Step 7: Drop extra columns
-        drop_columns = ["Capital Gains"]
-        df.drop(columns=[col for col in drop_columns if col in df.columns], inplace=True)
-
-        # ✅ Step 8: Ensure required columns exist
-        required_columns = ["symbol", "date", "c", "d", "dp", "h", "l", "o", "v"]
-        for col in required_columns:
-            if col not in df.columns:
-                logging.warning(f"⚠️ Missing column: {col}. Filling with default values.")
-                df[col] = 0 if col in ["c", "d", "dp", "h", "l", "o", "v"] else None
-
-        # ✅ Step 9: Convert data types
+        # ✅ Convert types to match PostgreSQL schema
         df = df.astype({
-            "c": float, "h": float, "l": float, "o": float, "v": int,
-            "d": float, "dp": float
+            "c": float, "h": float, "l": float, "o": float, "pc": float,
+            "t": int, "v":int  
         })
-        if "date" in df.columns:
-            df = df.loc[:, ~df.columns.duplicated()].copy()
-            df["date"] = pd.to_datetime(df["date"]).dt.date
 
-        # ✅ Ensure data is sorted by symbol and date
-        df = df.sort_values(["symbol", "date"])
-
-        # ✅ Assign previous day's closing price to 'pc'
-        df["pc"] = df.groupby("symbol")["c"].shift(1)  # Get previous day's closing price
-
-        # ✅ Fill NaN values (e.g., first entry) with 0 or another placeholder
-        df["pc"].fillna(0, inplace=True)
-
-        print(df[["symbol", "date", "c", "pc"]].head(10))
-
-        # drop unix_timestamp column if it exists
-        if "unix_timestamp" in df.columns:
-            df.drop(columns="unix_timestamp", inplace=True)
-
-
-
-        logging.info(f"📊 DataFrame ready for PostgreSQL insert:\n{df.dtypes}")
-        logging.info(df.head())
-
-        # ✅ Step 10: Connect to PostgreSQL
+        # ✅ Insert data into `staging_stock_data` (Replace existing daily batch)
         pg_hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
         engine = pg_hook.get_sqlalchemy_engine()
 
         with engine.begin() as conn:
-            # 🔍 Step 11: Drop and recreate `staging_stock_data`
-            logging.info("🗑️ Dropping `staging_stock_data` table if exists.")
-            conn.execute("DROP TABLE IF EXISTS staging_stock_data;")
-
-            # ✅ Step 12: Insert data
-            logging.info(f"📤 Inserting {len(df)} rows into `staging_stock_data`.")
             df.to_sql("staging_stock_data", conn, if_exists="replace", index=False)
 
-            # 🔍 Step 13: Verify the inserted data
-            result = conn.execute("SELECT COUNT(*) FROM staging_stock_data;")
-            count = result.fetchone()[0]
-            logging.info(f"🔍 Rows in `staging_stock_data` after insert: {count}")
+        logging.info(f"📥 Replaced staging table with {df.shape[0]} rows.")
 
-            if count == 0:
-                logging.error("❌ No rows inserted into `staging_stock_data`! Check logs.")
-
-        logging.info("✅ Staging table updated successfully!")
+        os.remove(local_parquet_path)
 
     except Exception as e:
-        logging.error(f"❌ Error in `load_parquet_to_postgres`: {e}")
-        raise
-
-
+        logging.error(f"❌ Error loading Parquet to PostgreSQL: {e}")
 
 # ✅ Update Stock Price History
 def update_stock_price_history():
@@ -287,45 +182,38 @@ def update_stock_price_history():
     log.info("🔄 Updating partitioned stock_price_history with latest stock data...")
 
     sql_query = """
-            INSERT INTO stock_price_history (
-                trade_date, market_cap_rank, company_name, country, symbol, 
-                opening_price, highest_price, lowest_price, closing_price, 
-                previous_closing_price, traded_volume
-            )
-            SELECT 
-                s.date AS trade_date,
-                t.rank AS market_cap_rank,
-                t.name AS company_name,
-                t.country,
-                s.symbol,
-                s.o AS opening_price,
-                s.h AS highest_price,
-                s.l AS lowest_price,
-                s.c AS closing_price,
-                
-                -- ✅ Use LAG() first, then fallback to last known closing_price
-                COALESCE(
-                    LAG(s.c) OVER (PARTITION BY s.symbol ORDER BY s.date),
-                    (SELECT closing_price FROM stock_price_history h
-                    WHERE h.symbol = s.symbol AND h.trade_date < s.date
-                    ORDER BY h.trade_date DESC LIMIT 1)
-                ) AS previous_closing_price,
-                
-                COALESCE(s.v, 0) AS traded_volume
-            FROM staging_stock_data s
-            LEFT JOIN tech_companies t ON s.symbol = t.symbol
-            ON CONFLICT (symbol, trade_date) 
-            DO UPDATE SET 
-                market_cap_rank = EXCLUDED.market_cap_rank,
-                company_name = EXCLUDED.company_name,
-                country = EXCLUDED.country,
-                opening_price = EXCLUDED.opening_price,
-                highest_price = EXCLUDED.highest_price,
-                lowest_price = EXCLUDED.lowest_price,
-                closing_price = EXCLUDED.closing_price,
-                previous_closing_price = EXCLUDED.previous_closing_price,
-                traded_volume = EXCLUDED.traded_volume;
-
+    INSERT INTO stock_price_history (
+        trade_date, market_cap_rank, company_name, country, symbol, 
+        opening_price, highest_price, lowest_price, closing_price, 
+        previous_closing_price, traded_volume, unix_timestamp
+    )
+    SELECT 
+        s.date AS trade_date,
+        t.rank AS market_cap_rank,
+        t.name AS company_name,
+        t.country,
+        s.symbol,
+        s.o AS opening_price,
+        s.h AS highest_price,
+        s.l AS lowest_price,
+        s.c AS closing_price,
+        s.pc AS previous_closing_price,
+        COALESCE(s.v, 0) AS traded_volume,
+        s.t AS unix_timestamp
+    FROM staging_stock_data s
+    LEFT JOIN tech_companies t ON s.symbol = t.symbol
+    ON CONFLICT (symbol, trade_date) 
+    DO UPDATE SET 
+        market_cap_rank = EXCLUDED.market_cap_rank,
+        company_name = EXCLUDED.company_name,
+        country = EXCLUDED.country,
+        opening_price = EXCLUDED.opening_price,
+        highest_price = EXCLUDED.highest_price,
+        lowest_price = EXCLUDED.lowest_price,
+        closing_price = EXCLUDED.closing_price,
+        previous_closing_price = EXCLUDED.previous_closing_price,
+        traded_volume = EXCLUDED.traded_volume,
+        unix_timestamp = EXCLUDED.unix_timestamp;
     """
 
     pg_hook = PostgresHook(postgres_conn_id="project_postgres")
@@ -446,37 +334,31 @@ with DAG(
     fetch_stock_task = PythonOperator(
         task_id="fetch_and_save_stock_data",
         python_callable=fetch_and_save_stock_data,
-        on_failure_callback=slack_failure_callback,
     )
 
     upload_json_task = PythonOperator(
         task_id="upload_json_to_gcs",
         python_callable=upload_json_to_gcs,
-        on_failure_callback=slack_failure_callback,
     )
 
     process_parquet_task = PythonOperator(
         task_id="process_json_to_parquet",
         python_callable=process_json_to_parquet,
-        on_failure_callback=slack_failure_callback,
     )
 
     load_postgres_task = PythonOperator(
         task_id="load_parquet_to_postgres",
-        python_callable=load_parquet_to_postgres,
-        on_failure_callback=slack_failure_callback,
+        python_callable=update_stock_price_history,
     )
 
     update_stock_task = PythonOperator(
         task_id="update_stock_price_history",
         python_callable=update_stock_price_history,
-        on_failure_callback=slack_failure_callback,
     )
 
     detect_patterns_task = PythonOperator(
         task_id="detect_trading_patterns",
         python_callable=detect_trading_patterns,
-        on_failure_callback=slack_failure_callback,
     )
 
     send_slack_notification_task = PythonOperator(

@@ -127,6 +127,20 @@ services:
     networks:
       - trading_network
 
+  streamlit:
+    build:
+      context: ../dashboard
+      dockerfile: Dockerfile
+    container_name: streamlit_app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ../dashboard:/app
+    working_dir: /app
+    command: ["streamlit", "run", "app.py"]
+    networks:
+      - trading_network
+
 volumes:
   postgres_data:
   project_data:
