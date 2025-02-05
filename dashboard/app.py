@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, timedelta
 import plotly.express as px
 from utils.data_loader import (
     load_company_list,
@@ -9,7 +9,8 @@ from utils.data_loader import (
     load_high_volatility_patterns,
     load_moving_average_crosses,
     load_recent_trading_patterns,
-    load_trend_patterns
+    load_trend_patterns,
+    load_stock_predictions  # Import the new function
 )
 from components.charts import plot_dark_candlestick_chart
 from components.indicators import calculate_sma, calculate_ema, calculate_rsi, calculate_bollinger_bands
@@ -31,8 +32,10 @@ if selected_page == "Company Insights":
         selected_company = next((c for c in company_options if c["dropdown_label"] == selected_label), None)
 
         st.sidebar.header("Select Date Range")
-        start_date = st.sidebar.date_input("Start Date", date.today().replace(day=1) - pd.DateOffset(days=90))
-        end_date = st.sidebar.date_input("End Date", date.today())
+        end_date = date.today()
+        start_date = end_date - timedelta(days=90)  # Default to last quarter
+        start_date = st.sidebar.date_input("Start Date", start_date)
+        end_date = st.sidebar.date_input("End Date", end_date)
 
         if start_date > end_date:
             st.sidebar.error("Warning: Start date must be before end date.")
@@ -48,35 +51,70 @@ if selected_page == "Company Insights":
 
             if not df.empty:
                 st.metric(label="Market Cap Rank", value=f"{selected_market_cap_rank}")
+                df = df.sort_values(by="trade_date", ascending=False)  # Sort by date in descending order
                 df = calculate_sma(df, window=14)
                 df = calculate_ema(df, window=14)
                 df = calculate_rsi(df, window=14)
                 df = calculate_bollinger_bands(df, window=20)
                 
-                st.write("### Stock Price History")
-                st.dataframe(df)
+                # Create columns for layout
+                col1, col2 = st.columns([3, 1])
+                
+                # Display stock prediction in the top right
+                with col2:
+                    prediction_df = load_stock_predictions(selected_symbol)
+                    if not prediction_df.empty:
+                        prediction_date = prediction_df.iloc[0]['trade_date']
+                        predicted_price = prediction_df.iloc[0]['predicted_closing_price']
+                        st.markdown(
+                            f"""
+                            <div style="text-align: center;">
+                                <h3>Stock Prediction</h3>
+                                <p> {prediction_date}</p>
+                                <p><h3>{predicted_price:.3f}<h3></p>
+                                </p>
+                                </p>
+                            </div>
+                            """,
+            unsafe_allow_html=True)
 
                 # Candlestick Chart
-                st.subheader("Stock Price Movement")
-                candlestick_fig = plot_dark_candlestick_chart(df, selected_company_name)
-                st.plotly_chart(candlestick_fig, use_container_width=True)
+                with col1:
+                    st.subheader("Stock Price Movement")
+                    candlestick_fig = plot_dark_candlestick_chart(df, selected_company_name)
+                    st.plotly_chart(candlestick_fig, use_container_width=True, height=600)  # Set a custom height for the chart
+
+
+                # Drop columns to hide
+                df_display = df.drop(columns=["unix_timestamp", "v", "SMA_14", "EMA_14", "RSI", "Bollinger_Upper", "Bollinger_Lower"], errors='ignore')
                 
+                st.write("### Stock Price History")
+                st.dataframe(df_display.head(10), hide_index=True)  # Display the last 10 days
+
                 # Technical Indicators
                 st.subheader("Technical Indicators")
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write("**Simple Moving Average (SMA)**")
-                    st.line_chart(df.set_index("trade_date")[["closing_price", "SMA_14"]])
+                    fig_sma = px.line(df, x=df["trade_date"], y=["closing_price", "SMA_14"], title="SMA Indicator")
+                    fig_sma.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_sma, use_container_width=True)
 
                     st.write("**Relative Strength Index (RSI)**")
-                    st.line_chart(df.set_index("trade_date")[["RSI"]])
+                    fig_rsi = px.line(df, x=df["trade_date"], y="RSI", title="RSI Indicator")
+                    fig_rsi.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_rsi, use_container_width=True)
 
                 with col2:
                     st.write("**Exponential Moving Average (EMA)**")
-                    st.line_chart(df.set_index("trade_date")[["closing_price", "EMA_14"]])
+                    fig_ema = px.line(df, x=df["trade_date"], y=["closing_price", "EMA_14"], title="EMA Indicator")
+                    fig_ema.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_ema, use_container_width=True)
 
                     st.write("**Bollinger Bands**")
-                    st.line_chart(df.set_index("trade_date")[["closing_price", "Upper Band", "Lower Band"]])
+                    fig_bb = px.line(df, x=df["trade_date"], y=["closing_price", "Bollinger_Upper", "Bollinger_Lower"], title="Bollinger Bands")
+                    fig_bb.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_bb, use_container_width=True)
             else:
                 st.warning("No data available for the selected company.")
 
@@ -90,31 +128,31 @@ elif selected_page == "Stock Comparison":
         company_labels = [company["dropdown_label"] for company in company_options]
         col1, col2 = st.columns(2)
         
+        st.subheader("Technical Indicators")
+        col1, col2 = st.columns(2)
         with col1:
-            selected_label_1 = st.selectbox("Select First Company", company_labels, key="comp1")
-            selected_company_1 = next((c for c in company_options if c["dropdown_label"] == selected_label_1), None)
-        
+            st.write("**Simple Moving Average (SMA)**")
+            fig_sma = px.line(df, x=df["trade_date"], y=["closing_price", "SMA_14"], title="SMA Indicator")
+            fig_sma.update_xaxes(tickformat="%Y-%m-%d")
+            st.plotly_chart(fig_sma, use_container_width=True)
+
+            st.write("**Relative Strength Index (RSI)**")
+            fig_rsi = px.line(df, x=df["trade_date"], y="RSI", title="RSI Indicator")
+            fig_rsi.update_xaxes(tickformat="%Y-%m-%d")
+            st.plotly_chart(fig_rsi, use_container_width=True)
+
         with col2:
-            selected_label_2 = st.selectbox("Select Second Company", company_labels, key="comp2")
-            selected_company_2 = next((c for c in company_options if c["dropdown_label"] == selected_label_2), None)
-        
-        if selected_company_1 and selected_company_2:
-            selected_symbol_1 = selected_company_1["symbol"]
-            selected_symbol_2 = selected_company_2["symbol"]
-            
-            df_1 = load_stock_data(company_name=selected_company_1["company_name"])
-            df_2 = load_stock_data(company_name=selected_company_2["company_name"])
-            
-            if not df_1.empty and not df_2.empty:
-                st.subheader("Stock Price Comparison")
-                
-                fig = px.line()
-                fig.add_scatter(x=df_1["trade_date"], y=df_1["closing_price"], mode='lines', name=selected_company_1["company_name"])
-                fig.add_scatter(x=df_2["trade_date"], y=df_2["closing_price"], mode='lines', name=selected_company_2["company_name"])
-                fig.update_layout(title_text="Stock Price Over Time", xaxis_title="Date", yaxis_title="Closing Price")
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("No data available for one or both selected companies.")
+            st.write("**Exponential Moving Average (EMA)**")
+            fig_ema = px.line(df, x=df["trade_date"], y=["closing_price", "EMA_14"], title="EMA Indicator")
+            fig_ema.update_xaxes(tickformat="%Y-%m-%d")
+            st.plotly_chart(fig_ema, use_container_width=True)
+
+            st.write("**Bollinger Bands**")
+            fig_bb = px.line(df, x=df["trade_date"], y=["closing_price", "Upper Band", "Lower Band"], title="Bollinger Bands")
+            fig_bb.update_xaxes(tickformat="%Y-%m-%d")
+            st.plotly_chart(fig_bb, use_container_width=True)
+    else:
+        st.warning("No data available for one or both selected companies.")
 
 
 elif selected_page == "General Market Trends":

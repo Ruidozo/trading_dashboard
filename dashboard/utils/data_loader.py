@@ -24,8 +24,8 @@ def load_company_list():
         return []
 
     query = """
-    SELECT DISTINCT company_name, symbol, market_cap_rank 
-    FROM stock_price_history 
+    SELECT DISTINCT name AS company_name, symbol, rank AS market_cap_rank 
+    FROM tech_companies 
     ORDER BY market_cap_rank ASC
     """
     df = pd.read_sql(query, engine)
@@ -36,31 +36,21 @@ def load_company_list():
     
     return df.to_dict(orient="records")
 
-
-def load_stock_data(company_name=None, start_date=None, end_date=None, limit=100):
-    """Fetch stock data with optional filters."""
+@st.cache_data(ttl=500)  # Set TTL to 0 to disable caching
+def load_stock_data(company_name, start_date, end_date):
+    # Assuming you have a database connection or a data source
+    query = f"""
+    SELECT * FROM stock_price_history
+    WHERE company_name = '{company_name}'
+    AND trade_date BETWEEN '{start_date}' AND '{end_date}'
+    ORDER BY trade_date DESC
+    """
+    # Replace with actual data loading logic
     engine = get_db_connection()
     if not engine:
         return pd.DataFrame()
-
-    query = "SELECT * FROM stock_price_history"
-    filters = []
-    
-    if company_name:
-        filters.append(f"company_name = '{company_name}'")
-    if start_date and end_date:
-        filters.append(f"trade_date BETWEEN '{start_date}' AND '{end_date}'")
-    
-    if filters:
-        query += " WHERE " + " AND ".join(filters)
-    
-    query += f" ORDER BY trade_date DESC LIMIT {limit}"
-
-    print(f"🔍 Running Query: {query}")  # ✅ Print the query for debugging
     df = pd.read_sql(query, engine)
     engine.dispose()
-
-    print(f"📊 Query Returned {len(df)} rows")  # ✅ Show how many rows are returned
     return df
 
 
@@ -114,12 +104,24 @@ def load_general_market_data(query):
     if not engine:
         return pd.DataFrame()
 
+def load_stock_predictions(symbol):
+    """Fetches the latest stock prediction for a given symbol."""
+    engine = get_db_connection()
+    if not engine:
+        return pd.DataFrame()
+
+    query = f"""
+    SELECT trade_date, predicted_closing_price
+    FROM stock_predictions
+    WHERE symbol = '{symbol}'
+    ORDER BY trade_date DESC
+    LIMIT 1
+    """
+
     try:
         with engine.connect() as conn:
-            df = pd.read_sql(query, conn)  # ✅ Use `conn`, not `engine`
+            df = pd.read_sql(query, conn)
         return df
     except Exception as e:
         print(f"Database query error: {e}")
         return pd.DataFrame()
-
-
