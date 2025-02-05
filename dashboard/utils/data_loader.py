@@ -125,3 +125,25 @@ def load_stock_predictions(symbol):
     except Exception as e:
         print(f"Database query error: {e}")
         return pd.DataFrame()
+    
+def load_company_news(symbol):
+    """Fetches the latest news for a given company symbol."""
+    engine = get_db_connection()
+    if not engine:
+        return pd.DataFrame()
+
+    query = f"""
+    SELECT news_date, headline, source, url
+    FROM daily_company_news
+    WHERE symbol = '{symbol}'
+    ORDER BY news_date DESC
+    LIMIT 5
+    """
+
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn)
+        return df
+    except SQLAlchemyError as e:
+        st.error(f"❌ Database query failed: {e}")
+        return pd.DataFrame()

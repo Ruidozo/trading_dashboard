@@ -1,3 +1,4 @@
+from json import load
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
@@ -10,7 +11,8 @@ from utils.data_loader import (
     load_moving_average_crosses,
     load_recent_trading_patterns,
     load_trend_patterns,
-    load_stock_predictions  # Import the new function
+    load_stock_predictions,  # Import the function for stock predictions
+    load_company_news
 )
 from components.charts import plot_dark_candlestick_chart
 from components.indicators import calculate_sma, calculate_ema, calculate_rsi, calculate_bollinger_bands
@@ -22,7 +24,7 @@ st.sidebar.header("Navigation")
 selected_page = st.sidebar.radio("Choose a View:", ["Company Insights", "General Market Trends", "Stock Comparison"])
 
 if selected_page == "Company Insights":
-    # COMPANY-SPECIFIC INSIGHTS SECTION
+    # Sidebar - Select a Company
     st.sidebar.header("Select a Company")
     company_options = load_company_list()
 
@@ -31,9 +33,10 @@ if selected_page == "Company Insights":
         selected_label = st.sidebar.selectbox("Select a Company", company_labels)
         selected_company = next((c for c in company_options if c["dropdown_label"] == selected_label), None)
 
+        # Sidebar - Select Date Range
         st.sidebar.header("Select Date Range")
         end_date = date.today()
-        start_date = end_date - timedelta(days=90)  # Default to last quarter
+        start_date = end_date - timedelta(days=90)  # Default to last 90 days
         start_date = st.sidebar.date_input("Start Date", start_date)
         end_date = st.sidebar.date_input("End Date", end_date)
 
@@ -45,53 +48,64 @@ if selected_page == "Company Insights":
             selected_symbol = selected_company["symbol"]
             selected_market_cap_rank = selected_company.get("market_cap_rank", "N/A")
 
-            st.title(f"{selected_company_name} ({selected_symbol}) Market Overview")
+            # 🔹 **Header Section (Company Title & Stock Prediction at the Top)**
+            header_col1, header_col2 = st.columns([3, 1])  # Title (wide) and prediction (narrow)
 
+            with header_col1:
+                st.title(f"{selected_company_name} ({selected_symbol}) Market Overview")
+                st.subheader(f"Market Cap Rank: {selected_market_cap_rank}")
+
+            with header_col2:
+                prediction_df = load_stock_predictions(selected_symbol)
+                if not prediction_df.empty:
+                    prediction_date = prediction_df.iloc[0]['trade_date']
+                    predicted_price = prediction_df.iloc[0]['predicted_closing_price']
+                    st.markdown(
+                        f"""
+                        <div style="text-align: center; padding: 10px; border: 2px solid gray; border-radius: 8px;">
+                            <h3>Stock Prediction</h3>
+                            <p><b>{prediction_date}</b></p>
+                            <p><h2>{predicted_price:.3f}</h2></p>
+                        </div>
+                        """,
+                    unsafe_allow_html=True)
+
+            # Load Stock Data
             df = load_stock_data(company_name=selected_company_name, start_date=start_date, end_date=end_date)
 
             if not df.empty:
-                st.metric(label="Market Cap Rank", value=f"{selected_market_cap_rank}")
                 df = df.sort_values(by="trade_date", ascending=False)  # Sort by date in descending order
                 df = calculate_sma(df, window=14)
                 df = calculate_ema(df, window=14)
                 df = calculate_rsi(df, window=14)
                 df = calculate_bollinger_bands(df, window=20)
-                
-                # Create columns for layout
-                col1, col2 = st.columns([3, 1])
-                
-                # Display stock prediction in the top right
-                with col2:
-                    prediction_df = load_stock_predictions(selected_symbol)
-                    if not prediction_df.empty:
-                        prediction_date = prediction_df.iloc[0]['trade_date']
-                        predicted_price = prediction_df.iloc[0]['predicted_closing_price']
-                        st.markdown(
-                            f"""
-                            <div style="text-align: center;">
-                                <h3>Stock Prediction</h3>
-                                <p> {prediction_date}</p>
-                                <p><h3>{predicted_price:.3f}<h3></p>
-                                </p>
-                                </p>
-                            </div>
-                            """,
-            unsafe_allow_html=True)
 
-                # Candlestick Chart
+                # 🔹 **Candlestick Chart & News Section (Balanced Layout)**
+                col1, col2 = st.columns([2, 1])  # Make chart wider, news narrower
+
+                # Candlestick Chart (Taller)
                 with col1:
                     st.subheader("Stock Price Movement")
                     candlestick_fig = plot_dark_candlestick_chart(df, selected_company_name)
-                    st.plotly_chart(candlestick_fig, use_container_width=True, height=600)  # Set a custom height for the chart
+                    st.plotly_chart(candlestick_fig, use_container_width=True, height=800)  # Increased height for better visibility
 
+                # News Section (Shorter)
+                with col2:
+                    st.markdown("<h3 style='text-align: center;'>Latest News</h3>", unsafe_allow_html=True)
+                    news_df = load_company_news(selected_symbol)
+                    if not news_df.empty:
+                        for index, row in news_df.iterrows():
+                            st.markdown(f"**{row['news_date']}** - [{row['headline']}]({row['url']}) ({row['source']})")
+                    else:
+                        st.write("No news available for this company.")
 
-                # Drop columns to hide
+                # 🔹 **Stock Price History Table**
                 df_display = df.drop(columns=["unix_timestamp", "v", "SMA_14", "EMA_14", "RSI", "Bollinger_Upper", "Bollinger_Lower"], errors='ignore')
                 
                 st.write("### Stock Price History")
                 st.dataframe(df_display.head(10), hide_index=True)  # Display the last 10 days
 
-                # Technical Indicators
+                # 🔹 **Technical Indicators Section**
                 st.subheader("Technical Indicators")
                 col1, col2 = st.columns(2)
                 with col1:
@@ -117,6 +131,7 @@ if selected_page == "Company Insights":
                     st.plotly_chart(fig_bb, use_container_width=True)
             else:
                 st.warning("No data available for the selected company.")
+
 
 elif selected_page == "Stock Comparison":
     # MULTI-STOCK COMPARISON SECTION
