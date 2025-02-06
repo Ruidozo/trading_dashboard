@@ -133,5 +133,10 @@ data/
 # test files
 tests/
 test_dags/
+<<<<<<< HEAD
+notbooks/
+
+=======
 notebooks/
 *.pyc
+>>>>>>> origin/main

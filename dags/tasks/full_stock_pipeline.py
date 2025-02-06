@@ -3,13 +3,11 @@ import json
 import logging
 import time
 import pandas as pd
-import traceback
 from datetime import datetime, timedelta
-from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.utils.task_group import TaskGroup
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from airflow.providers.slack.operators.slack_webhook import SlackWebhookOperator
 import yfinance as yf
 
 # ✅ Environment variables
@@ -400,95 +398,18 @@ def detect_trading_patterns():
     
     log.info("✅ Trading patterns detected and stored.")
 
-# ✅ Slack Notifications
-def send_slack_notification(context, status):
-    """Send Slack notification using Airflow connection."""
-    messages = {
-        "success": "✅ *Stock Price History Update Completed Successfully!* 📊",
-        "failure": "❌ *Stock Price History Update Failed!* ⚠️",
-    }
-    
-    message = messages.get(status, "ℹ️ *Stock Price History Update Status Unknown!*")
-    
-    slack_alert = SlackWebhookOperator(
-        task_id="slack_notification",
-        http_conn_id="slack_connection",
-        message=message,
-        username="airflow_bot",
-    )
-    return slack_alert.execute(context=context)
 
-# Success Callback
-def slack_success_callback(context):
-    return send_slack_notification(context, "success")
+# ✅ Convert to TaskGroup Function
+def full_stock_pipeline_taskgroup(dag):
+    with TaskGroup("full_stock_pipeline", dag=dag) as full_stock_pipeline:
+        fetch_stock_task = PythonOperator(task_id="fetch_stock_data", python_callable=fetch_and_save_stock_data)
+        upload_json_task = PythonOperator(task_id="upload_json_to_gcs", python_callable=upload_json_to_gcs)
+        process_parquet_task = PythonOperator(task_id="process_json_to_parquet", python_callable=process_json_to_parquet)
+        load_postgres_task = PythonOperator(task_id="load_parquet_to_postgres", python_callable=load_parquet_to_postgres)
+        update_stock_task = PythonOperator(task_id="update_stock_price_history", python_callable=update_stock_price_history)
+        detect_patterns_task = PythonOperator(task_id="detect_trading_patterns", python_callable=detect_trading_patterns)
 
-# Failure Callback
-def slack_failure_callback(context):
-    return send_slack_notification(context, "failure")
+        # ✅ Maintain Dependencies
+        fetch_stock_task >> upload_json_task >> process_parquet_task >> load_postgres_task >> update_stock_task >> detect_patterns_task
 
-
-# ✅ Define DAG
-with DAG(
-    dag_id="full_stock_pipeline",
-    default_args={
-        "owner": "airflow",
-        "depends_on_past": False,
-        "start_date": datetime(2025, 1, 4),
-        "retries": 3,
-        "retry_delay": timedelta(minutes=5),
-    },
-    schedule_interval="00 1 * * 1-5",
-    catchup=False,
-    max_active_runs=1,
-    tags=["finnhub", "data_ingestion", "gcs", "postgres"],
-) as dag:
-
-    fetch_stock_task = PythonOperator(
-        task_id="fetch_and_save_stock_data",
-        python_callable=fetch_and_save_stock_data,
-        on_failure_callback=slack_failure_callback,
-    )
-
-    upload_json_task = PythonOperator(
-        task_id="upload_json_to_gcs",
-        python_callable=upload_json_to_gcs,
-        on_failure_callback=slack_failure_callback,
-    )
-
-    process_parquet_task = PythonOperator(
-        task_id="process_json_to_parquet",
-        python_callable=process_json_to_parquet,
-        on_failure_callback=slack_failure_callback,
-    )
-
-    load_postgres_task = PythonOperator(
-        task_id="load_parquet_to_postgres",
-        python_callable=load_parquet_to_postgres,
-        on_failure_callback=slack_failure_callback,
-    )
-
-    update_stock_task = PythonOperator(
-        task_id="update_stock_price_history",
-        python_callable=update_stock_price_history,
-        on_failure_callback=slack_failure_callback,
-    )
-
-    detect_patterns_task = PythonOperator(
-        task_id="detect_trading_patterns",
-        python_callable=detect_trading_patterns,
-        on_failure_callback=slack_failure_callback,
-    )
-
-    send_slack_notification_task = PythonOperator(
-    task_id="slack_notification",
-    python_callable=send_slack_notification,
-    provide_context=True,  # ✅ Ensures Airflow passes execution context
-    op_args=[None],  # ✅ Placeholder for 'context' (Airflow auto-populates)
-    op_kwargs={"status": "success"},  # ✅ Explicitly passing 'status'
-)
-
-
-
-
-    # ✅ Define DAG sequence
-    fetch_stock_task >> upload_json_task >> process_parquet_task >> load_postgres_task >> update_stock_task >> detect_patterns_task >> send_slack_notification_task
+    return full_stock_pipeline
