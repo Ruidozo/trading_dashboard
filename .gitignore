@@ -4,6 +4,7 @@ configs/secrets.env
 configs/config.yaml
 configs/airflow_connections.json
 
+
 # Terraform files
 terraform/.terraform/
 
