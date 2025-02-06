@@ -242,7 +242,7 @@ default_args = {
 with DAG(
     dag_id="analyze_news_stock_patterns",
     default_args=default_args,
-    schedule_interval="0 4 * * 0",  # ✅ Runs every Sunday at 4am
+    schedule_interval="0 4 * * *",  # ✅ Runs every day at 4am
     catchup=False,
     tags=["news", "stocks", "analysis", "ml"],
 ) as dag:

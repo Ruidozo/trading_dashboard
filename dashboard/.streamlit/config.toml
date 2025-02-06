@@ -4,8 +4,16 @@ runOnSave = true
 
 [theme]
 base = "dark"
-primaryColor = "#ffffff"
+primaryColor = "#1DB954"  # A vibrant green color
 backgroundColor = "#121212"
 secondaryBackgroundColor = "#1E1E1E"
 textColor = "#E0E0E0"
 font = "sans serif"
+
+[global]
+# Enable wide mode for a more spacious layout
+wideMode = true
+
+[logger]
+# Set the log level to error to reduce noise
+level = "error"

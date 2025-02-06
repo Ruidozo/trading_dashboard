@@ -3,7 +3,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 import streamlit as st
 
-
 # Database connection string (Docker hostname)
 DB_URI = "postgresql://odiurdigital:dashboard@project_postgres:5432/project_db"
 
@@ -54,56 +53,6 @@ def load_stock_data(company_name, start_date, end_date):
     return df
 
 
-def load_high_volatility_patterns():
-    """Fetch high volatility trading patterns."""
-    engine = get_db_connection()
-    if not engine:
-        return pd.DataFrame()
-
-    query = "SELECT * FROM view_high_volatility_patterns"
-    df = pd.read_sql(query, engine)
-    engine.dispose()
-    return df
-
-def load_moving_average_crosses():
-    """Fetch moving average crossovers."""
-    engine = get_db_connection()
-    if not engine:
-        return pd.DataFrame()
-
-    query = "SELECT * FROM view_moving_average_crosses"
-    df = pd.read_sql(query, engine)
-    engine.dispose()
-    return df
-
-def load_recent_trading_patterns():
-    """Fetch recent trading patterns."""
-    engine = get_db_connection()
-    if not engine:
-        return pd.DataFrame()
-
-    query = "SELECT * FROM view_recent_trading_patterns"
-    df = pd.read_sql(query, engine)
-    engine.dispose()
-    return df
-
-def load_trend_patterns():
-    """Fetch general trend patterns."""
-    engine = get_db_connection()
-    if not engine:
-        return pd.DataFrame()
-
-    query = "SELECT * FROM view_trend_patterns"
-    df = pd.read_sql(query, engine)
-    engine.dispose()
-    return df
-
-def load_general_market_data(query):
-    """Fetches general market data based on custom queries."""
-    engine = get_db_connection()
-    if not engine:
-        return pd.DataFrame()
-
 def load_stock_predictions(symbol):
     """Fetches the latest stock prediction for a given symbol."""
     engine = get_db_connection()
@@ -147,3 +96,130 @@ def load_company_news(symbol):
     except SQLAlchemyError as e:
         st.error(f"❌ Database query failed: {e}")
         return pd.DataFrame()
+    
+def load_trading_patterns():
+    """Fetches trading patterns from the trading_patterns table."""
+    engine = get_db_connection()
+    if not engine:
+        return pd.DataFrame()
+
+    query = """
+    SELECT tp.symbol AS "Symbol", tc.name AS "Company Name", tp.pattern AS "Pattern", 
+           tp.trade_date AS "Date", tp.confidence_score AS "Confidence Score", 
+           tp.pattern_category AS "Category"
+    FROM trading_patterns tp
+    JOIN tech_companies tc ON tp.symbol = tc.symbol
+    WHERE tp.trade_date = (SELECT MAX(trade_date) FROM trading_patterns)
+    ORDER BY tc.rank ASC
+    LIMIT 100
+    """
+
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn)
+        return df
+    except SQLAlchemyError as e:
+        st.error(f"❌ Database query failed: {e}")
+        return pd.DataFrame()
+
+def load_top_gainers():
+    """Fetch top market gainers."""
+    engine = get_db_connection()
+    if not engine:
+        return pd.DataFrame()
+
+    query = """
+    SELECT company_name AS "Name", t.trade_date AS "Date", t.symbol, t.closing_price AS "Price", 
+           t.previous_closing_price AS "Previous Price",
+           ROUND((t.closing_price - t.previous_closing_price), 2) AS "Price Change", 
+           ROUND(((t.closing_price - t.previous_closing_price) / t.previous_closing_price) * 100, 2) AS "Percent Change"
+    FROM stock_price_history t
+    JOIN (
+        SELECT symbol, MAX(trade_date) AS latest_trade_date
+        FROM stock_price_history
+        GROUP BY symbol
+    ) sub ON t.symbol = sub.symbol AND t.trade_date = sub.latest_trade_date
+    WHERE t.previous_closing_price != 0
+    ORDER BY "Percent Change" DESC LIMIT 10;
+    """
+    df = pd.read_sql(query, engine)
+    engine.dispose()
+    return df
+
+def load_top_losers():
+    """Fetch top market losers."""
+    engine = get_db_connection()
+    if not engine:
+        return pd.DataFrame()
+
+    query = """
+    SELECT company_name AS "Name", t.trade_date AS "Date", t.symbol, t.closing_price AS "Price", 
+           t.previous_closing_price AS "Previous Price",
+           ROUND((t.closing_price - t.previous_closing_price), 2) AS "Price Change", 
+           ROUND(((t.closing_price - t.previous_closing_price) / t.previous_closing_price) * 100, 2) AS "Percent Change"
+    FROM stock_price_history t
+    JOIN (
+        SELECT symbol, MAX(trade_date) AS latest_trade_date
+        FROM stock_price_history
+        GROUP BY symbol
+    ) sub ON t.symbol = sub.symbol AND t.trade_date = sub.latest_trade_date
+    WHERE t.previous_closing_price != 0
+    ORDER BY "Percent Change" ASC LIMIT 10;
+    """
+    df = pd.read_sql(query, engine)
+    engine.dispose()
+    return df
+
+def load_market_trends():
+    """Fetch general market trends."""
+    engine = get_db_connection()
+    if not engine:
+        return pd.DataFrame()
+
+    query = """
+    SELECT symbol, closing_price, 
+           ROUND((closing_price - previous_closing_price), 2) AS price_change, 
+           ROUND(((closing_price - previous_closing_price) / previous_closing_price) * 100, 2) AS percent_change
+    FROM stock_price_history
+    WHERE trade_date = (SELECT MAX(trade_date) FROM stock_price_history)
+    AND previous_closing_price != 0
+    ORDER BY percent_change DESC LIMIT 10;
+    """
+    df = pd.read_sql(query, engine)
+    engine.dispose()
+    return df
+
+def load_market_behavior():
+    """Fetch and aggregate market data to show daily behavior."""
+    engine = get_db_connection()
+    if not engine:
+        return pd.DataFrame()
+
+    query = """
+    SELECT trade_date AS "Date", AVG(closing_price) AS "Average Price"
+    FROM stock_price_history
+    GROUP BY trade_date
+    ORDER BY trade_date
+    """
+    df = pd.read_sql(query, engine)
+    engine.dispose()
+    return df
+
+def load_high_volatility_stocks():
+    """Fetch high volatility stocks."""
+    engine = get_db_connection()
+    if not engine:
+        return pd.DataFrame()
+
+    query = """
+    SELECT symbol, trade_date AS "Date", closing_price AS "Price", 
+           ROUND((highest_price - lowest_price ), 2) AS "Price Range", 
+           ROUND(((highest_price - lowest_price ) / lowest_price ) * 100, 2) AS "Percent Range"
+    FROM stock_price_history
+    WHERE trade_date = (SELECT MAX(trade_date) FROM stock_price_history)
+    AND lowest_price  != 0
+    ORDER BY "Percent Range" DESC LIMIT 10;
+    """
+    df = pd.read_sql(query, engine)
+    engine.dispose()
+    return df

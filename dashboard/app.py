@@ -5,14 +5,15 @@ from datetime import date, timedelta
 import plotly.express as px
 from utils.data_loader import (
     load_company_list,
-    load_general_market_data,
     load_stock_data,
-    load_high_volatility_patterns,
-    load_moving_average_crosses,
-    load_recent_trading_patterns,
-    load_trend_patterns,
-    load_stock_predictions,  # Import the function for stock predictions
-    load_company_news
+    load_stock_predictions,
+    load_top_gainers,
+    load_top_losers,
+    load_trading_patterns,
+    load_company_news,
+    load_market_behavior,
+    load_high_volatility_stocks,
+    load_trading_patterns
 )
 from components.charts import plot_dark_candlestick_chart
 from components.indicators import calculate_sma, calculate_ema, calculate_rsi, calculate_bollinger_bands
@@ -132,8 +133,63 @@ if selected_page == "Company Insights":
             else:
                 st.warning("No data available for the selected company.")
 
+if selected_page == "General Market Trends":
+    # 🌍 GENERAL MARKET TRENDS SECTION
+    st.title("General Market Overview")
 
-elif selected_page == "Stock Comparison":
+     # 📊 General Market Behavior
+    st.subheader("General Market Behavior")
+    df_market_behavior = load_market_behavior()
+    
+    if not df_market_behavior.empty:
+        fig_market_behavior = px.line(df_market_behavior, x="Date", y="Average Price", title="Daily Average Closing Price")
+        fig_market_behavior.update_xaxes(tickformat="%Y-%m-%d")
+        st.plotly_chart(fig_market_behavior, use_container_width=True)
+    else:
+        st.warning("No market behavior data available.")
+
+    # 📊 Top Market Gainers & Losers
+    st.subheader("Top Market Gainers & Losers")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("**Top Gainers**")
+        df_gainers_losers = load_top_gainers()
+        if not df_gainers_losers.empty:
+            st.dataframe(df_gainers_losers)
+        else:
+            st.warning("No market data available.")
+
+    with col2:
+        st.write("**Top Losers**")
+        df_top_losers = load_top_losers()
+        if not df_top_losers.empty:
+            st.dataframe(df_top_losers)
+        else:
+            st.warning("No market data available.")
+
+    # 📈 High Volatility Stocks
+    with col1:
+        st.subheader("High Volatility Stocks")
+        df_high_volatility = load_high_volatility_stocks()
+        
+        if not df_high_volatility.empty:
+            st.dataframe(df_high_volatility)
+        else:
+            st.warning("No high volatility data available.")
+
+    with col2:
+    # 📋 Trading Patterns
+        st.subheader("Recent Trading Patterns")
+        df_trading_patterns = load_trading_patterns()
+        
+        if not df_trading_patterns.empty:
+            st.dataframe(df_trading_patterns)
+        else:
+            st.warning("No trading patterns data available.")
+
+
+if selected_page == "Stock Comparison":
     # MULTI-STOCK COMPARISON SECTION
     st.title("Compare Two Stocks")
     
@@ -143,82 +199,88 @@ elif selected_page == "Stock Comparison":
         company_labels = [company["dropdown_label"] for company in company_options]
         col1, col2 = st.columns(2)
         
-        st.subheader("Technical Indicators")
-        col1, col2 = st.columns(2)
         with col1:
-            st.write("**Simple Moving Average (SMA)**")
-            fig_sma = px.line(df, x=df["trade_date"], y=["closing_price", "SMA_14"], title="SMA Indicator")
-            fig_sma.update_xaxes(tickformat="%Y-%m-%d")
-            st.plotly_chart(fig_sma, use_container_width=True)
-
-            st.write("**Relative Strength Index (RSI)**")
-            fig_rsi = px.line(df, x=df["trade_date"], y="RSI", title="RSI Indicator")
-            fig_rsi.update_xaxes(tickformat="%Y-%m-%d")
-            st.plotly_chart(fig_rsi, use_container_width=True)
-
+            selected_label1 = st.selectbox("Select First Company", company_labels)
+            selected_company1 = next((c for c in company_options if c["dropdown_label"] == selected_label1), None)
+        
         with col2:
-            st.write("**Exponential Moving Average (EMA)**")
-            fig_ema = px.line(df, x=df["trade_date"], y=["closing_price", "EMA_14"], title="EMA Indicator")
-            fig_ema.update_xaxes(tickformat="%Y-%m-%d")
-            st.plotly_chart(fig_ema, use_container_width=True)
+            selected_label2 = st.selectbox("Select Second Company", company_labels)
+            selected_company2 = next((c for c in company_options if c["dropdown_label"] == selected_label2), None)
+        
+        if selected_company1 and selected_company2:
+            selected_company_name1 = selected_company1["company_name"]
+            selected_symbol1 = selected_company1["symbol"]
+            selected_company_name2 = selected_company2["company_name"]
+            selected_symbol2 = selected_company2["symbol"]
 
-            st.write("**Bollinger Bands**")
-            fig_bb = px.line(df, x=df["trade_date"], y=["closing_price", "Upper Band", "Lower Band"], title="Bollinger Bands")
-            fig_bb.update_xaxes(tickformat="%Y-%m-%d")
-            st.plotly_chart(fig_bb, use_container_width=True)
+            # Load Stock Data for both companies
+            end_date = date.today()
+            start_date = end_date - timedelta(days=90)  # Default to last 90 days
+
+            df1 = load_stock_data(company_name=selected_company_name1, start_date=start_date, end_date=end_date)
+            df2 = load_stock_data(company_name=selected_company_name2, start_date=start_date, end_date=end_date)
+
+            if not df1.empty and not df2.empty:
+                df1 = df1.sort_values(by="trade_date", ascending=False)  # Sort by date in descending order
+                df1 = calculate_sma(df1, window=14)
+                df1 = calculate_ema(df1, window=14)
+                df1 = calculate_rsi(df1, window=14)
+                df1 = calculate_bollinger_bands(df1, window=20)
+
+                df2 = df2.sort_values(by="trade_date", ascending=False)  # Sort by date in descending order
+                df2 = calculate_sma(df2, window=14)
+                df2 = calculate_ema(df2, window=14)
+                df2 = calculate_rsi(df2, window=14)
+                df2 = calculate_bollinger_bands(df2, window=20)
+
+                st.subheader("Technical Indicators")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Simple Moving Average (SMA) - {selected_company_name1}**")
+                    fig_sma1 = px.line(df1, x=df1["trade_date"], y=["closing_price", "SMA_14"], title=f"SMA Indicator - {selected_company_name1}")
+                    fig_sma1.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_sma1, use_container_width=True, key="sma1")
+
+                    st.write(f"**Relative Strength Index (RSI) - {selected_company_name1}**")
+                    fig_rsi1 = px.line(df1, x=df1["trade_date"], y="RSI", title=f"RSI Indicator - {selected_company_name1}")
+                    fig_rsi1.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_rsi1, use_container_width=True, key="rsi1")
+
+                with col2:
+                    st.write(f"**Exponential Moving Average (EMA) - {selected_company_name1}**")
+                    fig_ema1 = px.line(df1, x=df1["trade_date"], y=["closing_price", "EMA_14"], title=f"EMA Indicator - {selected_company_name1}")
+                    fig_ema1.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_ema1, use_container_width=True, key="ema1")
+
+                    st.write(f"**Bollinger Bands - {selected_company_name1}**")
+                    fig_bb1 = px.line(df1, x=df1["trade_date"], y=["closing_price", "Bollinger_Upper", "Bollinger_Lower"], title=f"Bollinger Bands - {selected_company_name1}")
+                    fig_bb1.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_bb1, use_container_width=True, key="bb1")
+
+                st.subheader("Technical Indicators")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Simple Moving Average (SMA) - {selected_company_name2}**")
+                    fig_sma2 = px.line(df2, x=df2["trade_date"], y=["closing_price", "SMA_14"], title=f"SMA Indicator - {selected_company_name2}")
+                    fig_sma2.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_sma2, use_container_width=True, key="sma2")
+
+                    st.write(f"**Relative Strength Index (RSI) - {selected_company_name2}**")
+                    fig_rsi2 = px.line(df2, x=df2["trade_date"], y="RSI", title=f"RSI Indicator - {selected_company_name2}")
+                    fig_rsi2.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_rsi2, use_container_width=True, key="rsi2")
+
+                with col2:
+                    st.write(f"**Exponential Moving Average (EMA) - {selected_company_name2}**")
+                    fig_ema2 = px.line(df2, x=df2["trade_date"], y=["closing_price", "EMA_14"], title=f"EMA Indicator - {selected_company_name2}")
+                    fig_ema2.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_ema2, use_container_width=True, key="ema2")
+
+                    st.write(f"**Bollinger Bands - {selected_company_name2}**")
+                    fig_bb2 = px.line(df2, x=df2["trade_date"], y=["closing_price", "Bollinger_Upper", "Bollinger_Lower"], title=f"Bollinger Bands - {selected_company_name2}")
+                    fig_bb2.update_xaxes(tickformat="%Y-%m-%d")
+                    st.plotly_chart(fig_bb2, use_container_width=True, key="bb2")
+            else:
+                st.warning("No data available for one or both selected companies.")
     else:
         st.warning("No data available for one or both selected companies.")
-
-
-elif selected_page == "General Market Trends":
-    # 🌍 GENERAL MARKET TRENDS SECTION
-    st.title("General Market Overview")
-
-    # 📊 Top Market Gainers & Losers
-    st.subheader("Top Market Gainers & Losers")
-    query_gainers_losers = """
-    SELECT symbol, company_name, closing_price, 
-           ROUND((closing_price - previous_closing_price), 2) AS price_change, 
-           ROUND(((closing_price - previous_closing_price) / previous_closing_price) * 100, 2) AS percent_change
-    FROM stock_price_history
-    ORDER BY percent_change DESC LIMIT 10;
-    """
-    df_gainers_losers = load_general_market_data(query_gainers_losers)
-    
-    if not df_gainers_losers.empty:
-        st.dataframe(df_gainers_losers)
-    else:
-        st.warning("No market data available.")
-
-    # 📈 High Volatility Stocks
-    st.subheader("High Volatility Patterns")
-    df_market_volatility = load_high_volatility_patterns()
-    if not df_market_volatility.empty:
-        st.dataframe(df_market_volatility)
-    else:
-        st.warning("No high volatility stocks found.")
-
-    # 📊 Moving Average Crosses
-    st.subheader("Moving Average Crosses")
-    df_moving_average_crosses = load_moving_average_crosses()
-    if not df_moving_average_crosses.empty:
-        st.dataframe(df_moving_average_crosses)
-    else:
-        st.warning("No moving average crosses detected.")
-
-    # 🔄 Recent Trading Patterns
-    st.subheader("Recent Trading Patterns")
-    df_trading_patterns = load_recent_trading_patterns()
-    if not df_trading_patterns.empty:
-        st.dataframe(df_trading_patterns)
-    else:
-        st.warning("No recent trading patterns found.")
-
-    # 📊 Market Trend Analysis
-    st.subheader("Market Trend Patterns")
-    df_trend_patterns = load_trend_patterns()
-    if not df_trend_patterns.empty:
-        st.dataframe(df_trend_patterns)
-    else:
-        st.warning("No trend patterns detected.")
-
