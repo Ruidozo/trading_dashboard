@@ -81,7 +81,6 @@ def get_companies_with_news():
         return set()
 
 # ✅ Function to Fetch News from Finnhub
-# ✅ Function to Fetch News from Finnhub
 def fetch_company_news():
     """Fetches news for all companies and stores in PostgreSQL."""
     symbols = fetch_company_symbols()
@@ -162,31 +161,43 @@ def transform_and_store_news():
         df = pd.DataFrame(news_records, columns=columns)
         df.rename(columns={'date': 'news_date'}, inplace=True)
 
-        print(f"🛠️ Available columns in DataFrame: {df.columns.tolist()}")
-        
-        # Transform the data (basic transformation example)
+        logging.info(f"🛠️ Available columns in DataFrame: {df.columns.tolist()}")
+
+        # Transform the data
         df['news_date'] = pd.to_datetime(df['news_date'])
         df = df.sort_values(by='news_date', ascending=False)
-        
+
         # Compute sentiment scores
         sia = SentimentIntensityAnalyzer()
-        df['sentiment_score'] = df.apply(lambda row: sia.polarity_scores(str(row['headline'] or '') + ' ' + str(row['summary'] or ''))['compound'], axis=1)
-        
-        
-        # Insert transformed data into daily_company_news table (partitioned)
+        df['sentiment_score'] = df.apply(
+            lambda row: sia.polarity_scores(str(row['headline'] or '') + ' ' + str(row['summary'] or ''))['compound'], 
+            axis=1
+        )
+
+        # ✅ Fix: Remove partition_date if it’s not needed, or add it dynamically
+        if 'partition_date' in df.columns:
+            df['partition_date'] = df['news_date']  # Use news_date as partition_date
+        else:
+            df['partition_date'] = df['news_date']  # Create it dynamically
+
+        # Insert transformed data into `daily_company_news`
         insert_query = """
         INSERT INTO daily_company_news (symbol, news_date, headline, summary, source, url, sentiment_score, date)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (symbol, headline, news_date, date) DO NOTHING;
-
         """
         
         for _, row in df.iterrows():
-            cursor.execute(insert_query, (row['symbol'], row['news_date'], row['headline'], row['summary'], row['source'], row['url'], row['sentiment_score'], row['partition_date']))
-        
+            cursor.execute(
+                insert_query, 
+                (row['symbol'], row['news_date'], row['headline'], row['summary'], row['source'], row['url'], row['sentiment_score'], row['partition_date'])
+            )
+
         conn.commit()
+        logging.info(f"✅ Inserted {len(df)} records into `daily_company_news` successfully.")
+
     except Exception as e:
-        print(f"Error during transformation: {e}")
+        logging.error(f"❌ Error during transformation: {e}")
     finally:
         cursor.close()
         conn.close()

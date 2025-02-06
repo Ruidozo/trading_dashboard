@@ -1,13 +1,7 @@
-import pandas as pd
-
 def calculate_sma(df, window=14):
     """Calculate Simple Moving Average (SMA)."""
-    if "closing_price" in df.columns:
-        df[f"SMA_{window}"] = df["closing_price"].rolling(window=window, min_periods=1).mean()
-    else:
-        print("Error: closing_price column is missing in DataFrame")
+    df[f"SMA_{window}"] = df["closing_price"].rolling(window=window).mean()
     return df
-
 
 def calculate_ema(df, window=14):
     """Calculate Exponential Moving Average (EMA)."""
@@ -23,9 +17,11 @@ def calculate_rsi(df, window=14):
     df["RSI"] = 100 - (100 / (1 + rs))
     return df
 
-def calculate_bollinger_bands(df, window=20):
+def calculate_bollinger_bands(df, window=20, num_std=2):
     """Calculate Bollinger Bands."""
-    df["SMA_20"] = df["closing_price"].rolling(window=window).mean()
-    df["Upper Band"] = df["SMA_20"] + (df["closing_price"].rolling(window=window).std() * 2)
-    df["Lower Band"] = df["SMA_20"] - (df["closing_price"].rolling(window=window).std() * 2)
+    rolling_mean = df["closing_price"].rolling(window=window).mean()
+    rolling_std = df["closing_price"].rolling(window=window).std()
+    
+    df["Bollinger_Upper"] = rolling_mean + (rolling_std * num_std)
+    df["Bollinger_Lower"] = rolling_mean - (rolling_std * num_std)
     return df
