@@ -62,29 +62,35 @@ with DAG(
 ) as dag:
 
     with TaskGroup("trading_dashboard") as trading_dashboard:
+        
         # Fetch & Process Tech Companies
-        download_task = PythonOperator(task_id="download_csv", python_callable=download_tech_companies_csv)
-        process_task = PythonOperator(task_id="process_tech_companies", python_callable=process_tech_companies)
+        with TaskGroup("fetch_tech_companies") as trading_dashboard:
+            download_task = PythonOperator(task_id="download_csv", python_callable=download_tech_companies_csv)
+            process_task = PythonOperator(task_id="process_tech_companies", python_callable=process_tech_companies)
 
         # Fetch & Process Stock Data
-        fetch_stock_task = PythonOperator(task_id="fetch_stock_data", python_callable=fetch_and_save_stock_data)
-        upload_json_task = PythonOperator(task_id="upload_json_to_gcs", python_callable=upload_json_to_gcs)
-        process_parquet_task = PythonOperator(task_id="process_json_to_parquet", python_callable=process_json_to_parquet)
-        load_postgres_task = PythonOperator(task_id="load_parquet_to_postgres", python_callable=load_parquet_to_postgres)
-        update_stock_task = PythonOperator(task_id="update_stock_price_history", python_callable=update_stock_price_history)
-        detect_patterns_task = PythonOperator(task_id="detect_trading_patterns", python_callable=detect_trading_patterns)
+        with TaskGroup("fetch_stock_data") as trading_dashboard:
+            fetch_stock_task = PythonOperator(task_id="fetch_stock_data", python_callable=fetch_and_save_stock_data)
+            upload_json_task = PythonOperator(task_id="upload_json_to_gcs", python_callable=upload_json_to_gcs)
+            process_parquet_task = PythonOperator(task_id="process_json_to_parquet", python_callable=process_json_to_parquet)
+            load_postgres_task = PythonOperator(task_id="load_parquet_to_postgres", python_callable=load_parquet_to_postgres)
+            update_stock_task = PythonOperator(task_id="update_stock_price_history", python_callable=update_stock_price_history)
+            detect_patterns_task = PythonOperator(task_id="detect_trading_patterns", python_callable=detect_trading_patterns)
 
         # Fetch & Transform News
-        fetch_news_task = PythonOperator(task_id="fetch_news", python_callable=fetch_company_news)
-        transform_news_task = PythonOperator(task_id="transform_news", python_callable=transform_and_store_news)
+        with TaskGroup("fetch_transform_news") as trading_dashboard:    
+            fetch_news_task = PythonOperator(task_id="fetch_news", python_callable=fetch_company_news)
+            transform_news_task = PythonOperator(task_id="transform_news", python_callable=transform_and_store_news)
 
         # Analyze News & Stock Patterns
-        run_analysis = PythonOperator(task_id="run_news_stock_analysis", python_callable=execute_sql)
-        train_model = PythonOperator(task_id="train_ml_model", python_callable=train_ml_model)
-        predict_movement = PythonOperator(task_id="predict_stock_movement", python_callable=predict_stock_movement)
+        with TaskGroup("analyze_news_stock_patterns") as trading_dashboard:
+            run_analysis = PythonOperator(task_id="run_news_stock_analysis", python_callable=execute_sql)
+            train_model = PythonOperator(task_id="train_ml_model", python_callable=train_ml_model)
+            predict_movement = PythonOperator(task_id="predict_stock_movement", python_callable=predict_stock_movement)
 
         # Slack Notifications
-        slack_task = PythonOperator(task_id="send_slack_notification", python_callable=slack_callback, provide_context=True)
+        with TaskGroup("send_slack_notification") as trading_dashboard:
+            slack_task = PythonOperator(task_id="send_slack_notification", python_callable=slack_callback, provide_context=True)
 
         # Define Dependencies
         download_task >> process_task >> fetch_stock_task
