@@ -8,6 +8,7 @@ import nltk
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.utils.task_group import TaskGroup
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
@@ -190,29 +191,9 @@ def transform_and_store_news():
         cursor.close()
         conn.close()
 
-# ✅ Airflow DAG Definition
-default_args = {
-    "owner": "airflow",
-    "depends_on_past": False,
-    "start_date": datetime(2025, 2, 2),
-    "retries": 1,
-}
-
-with DAG(
-    dag_id="fetch_transform_company_news",
-    default_args=default_args,
-    schedule_interval="0 3 * * *",  # ✅ Runs every day at 6 AM UTC
-    catchup=False,
-    tags=["finnhub", "news", "postgres"],
-) as dag:
-    fetch_news_task = PythonOperator(
-        task_id="fetch_news",
-        python_callable=fetch_company_news,
-    )
-
-    transform_news_task = PythonOperator(
-        task_id="transform_news",
-        python_callable=transform_and_store_news,
-    )
-
-    fetch_news_task >> transform_news_task
+def fetch_transform_news_taskgroup(dag):
+    with TaskGroup("fetch_transform_news", dag=dag) as fetch_transform_news:
+        fetch_news_task = PythonOperator(task_id="fetch_company_news", python_callable=fetch_company_news)
+        transform_news_task = PythonOperator(task_id="transform_and_store_news", python_callable=transform_and_store_news)
+        fetch_news_task >> transform_news_task
+    return fetch_transform_news

@@ -2,9 +2,8 @@ import os
 import logging
 import pandas as pd
 import requests
-from airflow import DAG
 from airflow.operators.python import PythonOperator
-from datetime import datetime, timedelta
+from airflow.utils.task_group import TaskGroup
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 # Logger setup
@@ -95,31 +94,10 @@ def process_tech_companies():
 
     log.info("✅ Stored filtered tech companies in PostgreSQL!")
 
-# DAG definition
-default_args = {
-    "owner": "airflow",
-    "depends_on_past": False,
-    "retries": 3,
-    "retry_delay": timedelta(minutes=5),
-}
-
-with DAG(
-    "fetch_tech_companies_csv",
-    default_args=default_args,
-    description="Download and process top 500 tech companies by market cap",
-    schedule_interval="@daily",  # Runs daily
-    start_date=datetime(2025, 1, 1),
-    catchup=False,
-) as dag:
-
-    download_task = PythonOperator(
-        task_id="download_tech_companies_csv",
-        python_callable=download_tech_companies_csv,
-    )
-
-    process_task = PythonOperator(
-        task_id="process_tech_companies",
-        python_callable=process_tech_companies,
-    )
-
-    download_task >> process_task  # DAG sequence
+# ✅ Convert to TaskGroup Function
+def fetch_tech_companies_taskgroup(dag):
+    with TaskGroup("fetch_tech_companies", dag=dag) as fetch_tech_companies:
+        download_task = PythonOperator(task_id="download_csv", python_callable=download_tech_companies_csv)
+        process_task = PythonOperator(task_id="process_tech_companies", python_callable=process_tech_companies)
+        download_task >> process_task
+    return fetch_tech_companies

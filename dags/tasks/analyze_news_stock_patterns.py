@@ -7,6 +7,7 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 import pandas as pd
 import joblib
+from airflow.utils.task_group import TaskGroup
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.preprocessing import StandardScaler
 import numpy as np
@@ -230,35 +231,11 @@ def predict_stock_movement():
     logging.info("✅ Stock predictions saved successfully with updated previous_closing_price.")
 
 
-
-# Airflow DAG Definition
-default_args = {
-    "owner": "airflow",
-    "depends_on_past": False,
-    "start_date": datetime(2025, 2, 3),
-    "retries": 1,
-}
-
-with DAG(
-    dag_id="analyze_news_stock_patterns",
-    default_args=default_args,
-    schedule_interval="0 4 * * 0",  # ✅ Runs every Sunday at 4am
-    catchup=False,
-    tags=["news", "stocks", "analysis", "ml"],
-) as dag:
-    run_analysis = PythonOperator(
-        task_id="run_news_stock_analysis",
-        python_callable=execute_sql,
-    )
-    
-    train_model = PythonOperator(
-        task_id="train_ml_model",
-        python_callable=train_ml_model,
-    )
-    
-    predict_movement = PythonOperator(
-        task_id="predict_stock_movement",
-        python_callable=predict_stock_movement,
-    )
-
-    run_analysis >> train_model >> predict_movement
+# ✅ Convert to TaskGroup Function
+def analyze_news_stock_patterns_taskgroup(dag):
+    with TaskGroup("analyze_news_stock_patterns", dag=dag) as analyze_news_stock_patterns:
+        run_analysis = PythonOperator(task_id="run_news_stock_analysis", python_callable=execute_sql)
+        train_model = PythonOperator(task_id="train_ml_model", python_callable=train_ml_model)
+        predict_movement = PythonOperator(task_id="predict_stock_movement", python_callable=predict_stock_movement)
+        run_analysis >> train_model >> predict_movement
+    return analyze_news_stock_patterns
