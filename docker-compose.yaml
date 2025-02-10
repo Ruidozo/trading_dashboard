@@ -1,0 +1,154 @@
+version: '3.8'
+
+networks:
+  trading_network:
+    name: trading_network
+    driver: bridge
+
+services:
+  postgres:
+    image: postgres:13
+    container_name: postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - trading_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  project_postgres:
+    image: postgres:13
+    container_name: project_postgres
+    environment:
+      POSTGRES_USER: odiurdigital
+      POSTGRES_PASSWORD: dashboard
+      POSTGRES_DB: project_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - project_data:/var/lib/postgresql/data
+    networks:
+      - trading_network
+
+  airflow-init:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    image: custom-airflow:latest
+    container_name: airflow-init
+    depends_on:
+      - postgres
+    env_file:
+      - ../configs/secrets.env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/google_credentials.json
+    volumes:
+      - ../configs:/opt/airflow/configs
+      - ../dags:/opt/airflow/dags
+      - ../data:/opt/airflow/data
+    command: >
+      bash -c "
+        airflow db check || airflow db init && airflow db upgrade &&
+        airflow users create --username admin --password admin123 --firstname Airflow --lastname Admin --role Admin --email admin@example.com || echo 'User already exists'"
+    networks:
+      - trading_network
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    image: custom-airflow:latest
+    container_name: airflow-webserver
+    depends_on:
+      postgres:
+        condition: service_healthy
+      project_postgres:
+        condition: service_started 
+      airflow-init:
+        condition: service_completed_successfully
+    env_file:
+      - ../configs/secrets.env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__WEBSERVER__RBAC: "True"
+      GCS_BUCKET_NAME: trading_dashboard_stock_data
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/google_credentials.json
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+      - airflow_plugins:/opt/airflow/plugins
+      - ../data:/opt/airflow/data
+      - ../configs:/opt/airflow/configs
+    command: ["airflow", "webserver"]
+    networks:
+      - trading_network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    restart: always
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    image: custom-airflow:latest
+    container_name: airflow-scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      project_postgres:
+        condition: service_started
+      airflow-init:
+        condition: service_completed_successfully
+    env_file:
+      - ../configs/secrets.env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/google_credentials.json
+    volumes:
+      - ../configs:/opt/airflow/configs
+      - ../dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+      - airflow_plugins:/opt/airflow/plugins
+      - ../data:/opt/airflow/data
+    command: ["airflow", "scheduler"]
+    networks:
+      - trading_network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    restart: always
+
+  streamlit:
+    build:
+      context: ../dashboard
+      dockerfile: Dockerfile
+    container_name: streamlit_app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ../dashboard:/app
+    working_dir: /app
+    command: ["streamlit", "run", "app.py"]
+    networks:
+      - trading_network
+volumes:
+  postgres_data:
+  project_data:
+  airflow_logs:
+  airflow_plugins:

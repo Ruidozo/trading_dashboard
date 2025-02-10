@@ -15,7 +15,7 @@ def get_db_connection():
         st.error(f"❌ Database connection failed: {e}")  # ✅ Show error inside Streamlit
         return None
 
-
+@st.cache_data(ttl=3600)  # Cache the result for 1 hour
 def load_company_list():
     """Fetch a distinct list of companies, ordered by market cap rank."""
     engine = get_db_connection()
@@ -35,7 +35,7 @@ def load_company_list():
     
     return df.to_dict(orient="records")
 
-@st.cache_data(ttl=500)  # Set TTL to 0 to disable caching
+@st.cache_data(ttl=3600) 
 def load_stock_data(company_name, start_date, end_date):
     # Assuming you have a database connection or a data source
     query = f"""
@@ -74,7 +74,8 @@ def load_stock_predictions(symbol):
     except Exception as e:
         print(f"Database query error: {e}")
         return pd.DataFrame()
-    
+
+@st.cache_data(ttl=3600) 
 def load_company_news(symbol):
     """Fetches the latest news for a given company symbol."""
     engine = get_db_connection()
@@ -96,7 +97,8 @@ def load_company_news(symbol):
     except SQLAlchemyError as e:
         st.error(f"❌ Database query failed: {e}")
         return pd.DataFrame()
-    
+
+@st.cache_data(ttl=3600) 
 def load_trading_patterns():
     """Fetches trading patterns from the trading_patterns table."""
     engine = get_db_connection()
@@ -122,6 +124,7 @@ def load_trading_patterns():
         st.error(f"❌ Database query failed: {e}")
         return pd.DataFrame()
 
+@st.cache_data(ttl=3600) 
 def load_top_gainers():
     """Fetch top market gainers."""
     engine = get_db_connection()
@@ -146,6 +149,7 @@ def load_top_gainers():
     engine.dispose()
     return df
 
+@st.cache_data(ttl=3600) 
 def load_top_losers():
     """Fetch top market losers."""
     engine = get_db_connection()
@@ -170,6 +174,7 @@ def load_top_losers():
     engine.dispose()
     return df
 
+@st.cache_data(ttl=3600) 
 def load_market_trends():
     """Fetch general market trends."""
     engine = get_db_connection()
@@ -189,6 +194,7 @@ def load_market_trends():
     engine.dispose()
     return df
 
+@st.cache_data(ttl=3600) 
 def load_market_behavior():
     """Fetch and aggregate market data to show daily behavior."""
     engine = get_db_connection()
@@ -205,6 +211,7 @@ def load_market_behavior():
     engine.dispose()
     return df
 
+@st.cache_data(ttl=3600) 
 def load_high_volatility_stocks():
     """Fetch high volatility stocks."""
     engine = get_db_connection()

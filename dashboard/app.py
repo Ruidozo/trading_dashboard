@@ -59,17 +59,19 @@ if selected_page == "Company Insights":
             with header_col2:
                 prediction_df = load_stock_predictions(selected_symbol)
                 if not prediction_df.empty:
-                    prediction_date = prediction_df.iloc[0]['trade_date']
+                    from datetime import date
+                    current_date = date.today().strftime('%Y-%m-%d')
                     predicted_price = prediction_df.iloc[0]['predicted_closing_price']
                     st.markdown(
                         f"""
                         <div style="text-align: center; padding: 10px; border: 2px solid gray; border-radius: 8px;">
                             <h3>Stock Prediction</h3>
-                            <p><b>{prediction_date}</b></p>
+                            <p><b>{current_date}</b></p>
                             <p><h2>{predicted_price:.3f}</h2></p>
                         </div>
                         """,
-                    unsafe_allow_html=True)
+                        unsafe_allow_html=True
+                    )
 
             # Load Stock Data
             df = load_stock_data(company_name=selected_company_name, start_date=start_date, end_date=end_date)
