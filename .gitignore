@@ -3,8 +3,6 @@ configs/google_credentials.json
 configs/secrets.env
 configs/config.yaml
 configs/airflow_connections.json
-configs/trading_dashboard.pem
-
 
 # Terraform files
 terraform/.terraform/
