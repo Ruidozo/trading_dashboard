@@ -49,10 +49,27 @@ def fetch_and_save_stock_data():
     cursor.close()
     conn.close()
 
+    from datetime import datetime, timedelta
+
+    # Use same helper logic to set last trading day.
+    def get_last_trading_day(ref_date):
+        # If ref_date is Saturday (5) or Sunday (6), adjust to Friday.
+        if ref_date.weekday() == 5:
+            return ref_date - timedelta(days=1)
+        elif ref_date.weekday() == 6:
+            return ref_date - timedelta(days=2)
+        return ref_date
+
+    potential_day = (datetime.utcnow() - timedelta(days=1)).date()
+    last_trading_day = get_last_trading_day(potential_day)
+    date_folder = last_trading_day.strftime('%Y/%m/%d')
+    utc_date_str = last_trading_day.strftime('%Y%m%d')
+    utc_date_formatted = last_trading_day.strftime('%Y-%m-%d')
+
     for symbol in companies:
         try:
             stock = yf.Ticker(symbol)
-            hist = stock.history(period="1d", interval="1d")  # ✅ This gets only the last available day's data
+            hist = stock.history(period="1d", interval="1d")  # Last available day's data
 
             if hist.empty:
                 logging.warning(f"⚠️ No valid data received for {symbol}. Skipping.")
@@ -69,13 +86,13 @@ def fetch_and_save_stock_data():
             }, inplace=True)
 
             data = hist.to_dict(orient="records")
-            data = [{**row, "trade_date": row["trade_date"].strftime("%Y-%m-%d")} for row in data]
+            # Overwrite trade_date to match the computed last_trading_day
+            data = [{**row, "trade_date": utc_date_formatted} for row in data]
 
-            date_path = datetime.utcnow().strftime('%Y/%m/%d')
-            full_path = os.path.join("/opt/airflow/data/raw/", date_path)
+            full_path = os.path.join("/opt/airflow/data/raw/", date_folder)
             os.makedirs(full_path, exist_ok=True)
 
-            file_path = os.path.join(full_path, f"{symbol}_{datetime.utcnow().strftime('%Y%m%d')}.json")
+            file_path = os.path.join(full_path, f"{symbol}_{utc_date_str}.json")
             with open(file_path, "w") as f:
                 json.dump(data, f)
 
@@ -109,13 +126,41 @@ def upload_json_to_gcs():
                     logging.error(f"❌ Failed to upload {local_file_path}: {e}")
 
 # ✅ Process JSON to Parquet
-def process_json_to_parquet():
+def process_json_to_parquet(last_trading_day=None):
+    """
+    Process JSON files and convert them to Parquet.
+    :param last_trading_day: (str) Target date in 'YYYY-MM-DD' format. If not provided, defaults to last trading day.
+    """
+    from datetime import datetime, timedelta
+
+    # Helper to adjust for weekends
+    def get_last_trading_day(ref_date):
+        # If ref_date is Saturday (5) or Sunday (6), adjust to Friday.
+        if ref_date.weekday() == 5:
+            return ref_date - timedelta(days=1)
+        elif ref_date.weekday() == 6:
+            return ref_date - timedelta(days=2)
+        return ref_date
+
+    # Determine the target trading day:
+    if last_trading_day is None:
+        # When no parameter is provided, default to yesterday then adjust for weekend.
+        potential_day = (datetime.utcnow() - timedelta(days=1)).date()
+        last_trading_day_dt = datetime.combine(get_last_trading_day(potential_day), datetime.min.time())
+    elif isinstance(last_trading_day, str):
+        dt = datetime.strptime(last_trading_day, "%Y-%m-%d")
+        last_trading_day_dt = datetime.combine(get_last_trading_day(dt.date()), datetime.min.time())
+    else:
+        # Assume a datetime is passed
+        last_trading_day_dt = datetime.combine(get_last_trading_day(last_trading_day.date()), datetime.min.time())
+
+    # Build folder prefix using the target trading day's date
+    folder_prefix = last_trading_day_dt.strftime('%Y/%m/%d')
     gcs_hook = GCSHook(gcp_conn_id="google_cloud_default")
-    today = datetime.utcnow().strftime('%Y/%m/%d')
-    files = gcs_hook.list(bucket_name=GCS_BUCKET_NAME, prefix=f"{today}/")
+    files = gcs_hook.list(bucket_name=GCS_BUCKET_NAME, prefix=f"{folder_prefix}/")
 
     if not files:
-        logging.warning(f"⚠️ No JSON files found in GCS for {today}")
+        logging.warning(f"⚠️ No JSON files found in GCS for {folder_prefix}")
         return
 
     all_data = []
@@ -124,22 +169,24 @@ def process_json_to_parquet():
             json_data = gcs_hook.download(bucket_name=GCS_BUCKET_NAME, object_name=file)
             json_content = json.loads(json_data.decode('utf-8'))  # Load JSON
             
-            # Ensure json_content is a list, as your JSON files contain lists of stock data
+            # Log the trade dates found in the file
+            trade_dates = [entry.get("trade_date") for entry in json_content if isinstance(entry, dict)]
+            logging.info(f"DEBUG: File '{file}' contains trade_date values: {trade_dates}")
+
             if not isinstance(json_content, list):
                 logging.error(f"❌ Unexpected JSON structure in {file}")
-                continue  # Skip this file
-            
+                continue
+
             symbol = file.split("/")[-1].split("_")[0]
-            target_date = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')  # ✅ Correct: Look for yesterday's data
+            target_date = last_trading_day_dt.strftime('%Y-%m-%d')
 
             # Extract only the record for the target date
-            filtered_data = [entry for entry in json_content if entry["trade_date"] == target_date]
+            filtered_data = [entry for entry in json_content if entry.get("trade_date") == target_date]
 
             if not filtered_data:
                 logging.warning(f"⚠️ No matching stock data found for {target_date} in {file}")
-                continue  # Skip if no data for today
+                continue
 
-            # Append additional metadata
             for entry in filtered_data:
                 entry["symbol"] = symbol
                 entry["date"] = target_date
@@ -151,8 +198,8 @@ def process_json_to_parquet():
 
     if all_data:
         df = pd.DataFrame(all_data)
-        year_month = datetime.utcnow().strftime('%Y/%m')
-        parquet_filename = f"daily_stocks_{datetime.utcnow().strftime('%Y-%m-%d')}.parquet"
+        year_month = last_trading_day_dt.strftime('%Y/%m')
+        parquet_filename = f"daily_stocks_{last_trading_day_dt.strftime('%Y-%m-%d')}.parquet"
         local_parquet_path = f"/tmp/{parquet_filename}"
 
         df.to_parquet(local_parquet_path, index=False)
@@ -164,15 +211,28 @@ def process_json_to_parquet():
         os.remove(local_parquet_path)
         logging.info(f"✅ Parquet saved and uploaded: {parquet_filename}")
 
-
 # ✅ Load Parquet to PostgreSQL
 def load_parquet_to_postgres():
-    gcs_hook = GCSHook(gcp_conn_id="google_cloud_default")
-    today = datetime.utcnow()
-    year_month = today.strftime('%Y/%m')
-    parquet_filename = f"daily_stocks_{today.strftime('%Y-%m-%d')}.parquet"
+    from datetime import datetime, timedelta
+
+    # Helper to adjust for weekends
+    def get_last_trading_day(ref_date):
+        if ref_date.weekday() == 5:
+            return ref_date - timedelta(days=1)
+        elif ref_date.weekday() == 6:
+            return ref_date - timedelta(days=2)
+        return ref_date
+
+    potential_day = (datetime.utcnow() - timedelta(days=1)).date()
+    last_trading_day = get_last_trading_day(potential_day)
+    
+    year_month = last_trading_day.strftime('%Y/%m')
+    parquet_filename = f"daily_stocks_{last_trading_day.strftime('%Y-%m-%d')}.parquet"
     gcs_parquet_path = f"{year_month}/{parquet_filename}"
     local_parquet_path = f"/tmp/{parquet_filename}"
+    
+    # Instantiate gcs_hook before using it
+    gcs_hook = GCSHook(gcp_conn_id="google_cloud_default")
 
     try:
         # ✅ Step 1: Download Parquet from GCS

@@ -9,3 +9,4 @@ yahooquery
 yfinance
 nltk
 scikit-learn
+pymysql

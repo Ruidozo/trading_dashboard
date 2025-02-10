@@ -1,5 +1,8 @@
+version: '3.8'
+
 networks:
   trading_network:
+    name: trading_network
     driver: bridge
 
 services:
@@ -93,12 +96,12 @@ services:
     command: ["airflow", "webserver"]
     networks:
       - trading_network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    restart: always
 
   airflow-scheduler:
-    deploy:
-      resources:
-        limits:
-          memory: 2g
     build:
       context: .
       dockerfile: ./Dockerfile
@@ -126,6 +129,10 @@ services:
     command: ["airflow", "scheduler"]
     networks:
       - trading_network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    restart: always
 
   streamlit:
     build:
@@ -140,7 +147,6 @@ services:
     command: ["streamlit", "run", "app.py"]
     networks:
       - trading_network
-
 volumes:
   postgres_data:
   project_data:

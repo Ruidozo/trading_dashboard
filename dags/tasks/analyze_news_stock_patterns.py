@@ -9,6 +9,7 @@ import pandas as pd
 import joblib
 from airflow.utils.task_group import TaskGroup
 from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 
@@ -73,14 +74,13 @@ def execute_sql():
     logging.info("✅ News & stock pattern analysis completed successfully.")
 
 def train_ml_model():
-    """Trains an ML model using stock history data, including previous closing price."""
+    """Trains an ML model using all available stock history data and a correction model that learns prediction errors."""
     pg_hook = PostgresHook(postgres_conn_id="project_postgres")
 
     sql_query = """
         SELECT symbol, trade_date, opening_price, highest_price, lowest_price, closing_price, traded_volume,
             LAG(closing_price) OVER (PARTITION BY symbol ORDER BY trade_date) AS previous_closing_price
         FROM stock_price_history
-        WHERE trade_date >= CURRENT_DATE - INTERVAL '6 months'
         ORDER BY symbol, trade_date;
     """
 
@@ -92,29 +92,25 @@ def train_ml_model():
         logging.warning("⚠️ Not enough stock data to train the model. Skipping training.")
         return
 
-    # ✅ Compute additional features
+    # Compute additional features
     df['price_change'] = df.groupby('symbol')['closing_price'].pct_change() * 100
     df['volatility'] = ((df['highest_price'] - df['lowest_price']) / df['lowest_price']) * 100
 
-    # ✅ Fill NaNs
+    # Fill NaNs
     df['previous_closing_price'].fillna(df['closing_price'], inplace=True)
-    df.fillna(0, inplace=True)  # Ensure no NaNs remain
-
-    # ✅ **Replace `Inf` values with NaN, then fill them with 0**
+    df.fillna(0, inplace=True)
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.fillna(0, inplace=True)
 
-    # ✅ Select Features & Target
+    # Select Features & Target
     features = ['opening_price', 'highest_price', 'lowest_price', 'closing_price', 
                 'traded_volume', 'price_change', 'volatility', 'previous_closing_price']
-    
-    df = df.dropna(subset=['closing_price'])  # Ensure `closing_price` has no NaNs
+    df = df.dropna(subset=['closing_price'])
     X = df[features]
-    y = df['closing_price'].shift(-1).dropna()  # Predict next day's closing price
+    y = df['closing_price'].shift(-1).dropna()
+    X = X.iloc[:len(y)]
 
-    X = X.iloc[:len(y)]  # Ensure `X` and `y` match in size
-
-    # 🔍 **Check for any remaining NaNs or Inf values**
+    # Check for any remaining NaNs or Inf values
     logging.info(f"🔍 NaN values before scaling:\n{X.isnull().sum()}")
     logging.info(f"🔍 Checking for Inf values: {np.isinf(X).sum().sum()}")
 
@@ -122,34 +118,48 @@ def train_ml_model():
         logging.error("❌ Data still contains NaN or Inf values. Skipping training.")
         return
 
-    # ✅ Normalize the features
+    # Normalize the features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # ✅ Train the model
-    model = LinearRegression()
-    model.fit(X_scaled, y)
+    # Train primary model
+    primary_model = LinearRegression()
+    primary_model.fit(X_scaled, y)
 
-    # ✅ Save model & scaler
+    # Calculate error margin for the primary model
+    primary_preds = primary_model.predict(X_scaled)
+    mae = mean_absolute_error(y, primary_preds)
+    rmse = mean_squared_error(y, primary_preds, squared=False)
+    logging.info(f"📉 Error margin for primary model: MAE = {mae:.2f}, RMSE = {rmse:.2f}")
+
+    # Compute residuals (error) and train a correction model
+    residuals = y - primary_preds
+    correction_model = LinearRegression()
+    correction_model.fit(X_scaled, residuals)
+
+    # Save both models & scaler
     model_path = "/opt/airflow/models"
     os.makedirs(model_path, exist_ok=True)
-    joblib.dump(model, os.path.join(model_path, 'stock_prediction_model.pkl'))
+    joblib.dump(primary_model, os.path.join(model_path, 'stock_primary_model.pkl'))
+    joblib.dump(correction_model, os.path.join(model_path, 'stock_correction_model.pkl'))
     joblib.dump(scaler, os.path.join(model_path, 'stock_scaler.pkl'))
 
-    logging.info("✅ Stock price model trained and saved successfully.")
+    logging.info("✅ Stock price models (primary & correction) trained and saved successfully.")
 
 
 def predict_stock_movement():
-    """Predicts stock movements using the latest available stock data, ensuring previous_closing_price is updated."""
-    
-    model_path = '/opt/airflow/models/stock_prediction_model.pkl'
-    scaler_path = '/opt/airflow/models/stock_scaler.pkl'
+    """Predicts stock movements using the latest available stock data and adjusts predictions using a correction model."""
+    model_path = '/opt/airflow/models'
+    primary_model_path = os.path.join(model_path, 'stock_primary_model.pkl')
+    correction_model_path = os.path.join(model_path, 'stock_correction_model.pkl')
+    scaler_path = os.path.join(model_path, 'stock_scaler.pkl')
 
-    if not os.path.exists(model_path) or not os.path.exists(scaler_path):
-        logging.error(f"❌ Model or scaler file not found.")
+    if not (os.path.exists(primary_model_path) and os.path.exists(correction_model_path) and os.path.exists(scaler_path)):
+        logging.error("❌ One or more model/scaler files not found.")
         return
 
-    model = joblib.load(model_path)
+    primary_model = joblib.load(primary_model_path)
+    correction_model = joblib.load(correction_model_path)
     scaler = joblib.load(scaler_path)
 
     pg_hook = PostgresHook(postgres_conn_id="project_postgres")
@@ -193,21 +203,19 @@ def predict_stock_movement():
 
     df.fillna(0, inplace=True)
 
-    # ✅ Use the same features as the trained model
     features_for_prediction = ['opening_price', 'highest_price', 'lowest_price', 'closing_price', 
                                'traded_volume', 'price_change', 'volatility', 'previous_closing_price']
-
     X = df[features_for_prediction]
-
-    # ✅ Normalize the features
     X_scaled = scaler.transform(X)
 
-    # ✅ Make predictions
-    predictions = model.predict(X_scaled)
-    df["predicted_closing_price"] = predictions
+    # Get predictions from both models and adjust the final prediction
+    primary_preds = primary_model.predict(X_scaled)
+    correction_preds = correction_model.predict(X_scaled)
+    final_predictions = primary_preds + correction_preds
+
+    df["predicted_closing_price"] = final_predictions
     df["trade_date"] += pd.Timedelta(days=1)
 
-    # ✅ Insert into `stock_predictions`
     selected_columns = ['trade_date', 'symbol', 'company_name', 'market_cap_rank', 'previous_closing_price', 'predicted_closing_price']
     df = df[selected_columns]
 
@@ -227,8 +235,7 @@ def predict_stock_movement():
 
     conn.commit()
     cursor.close()
-
-    logging.info("✅ Stock predictions saved successfully with updated previous_closing_price.")
+    logging.info("✅ Stock predictions saved successfully with adjusted predictions.")
 
 
 # ✅ Convert to TaskGroup Function
