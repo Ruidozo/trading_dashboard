@@ -139,3 +139,6 @@ test_dags/
 notebooks/
 *.pyc
 cloud_sql_proxy
+
+
+.pre-commit-config.yaml

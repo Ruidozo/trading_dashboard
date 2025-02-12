@@ -10,9 +10,9 @@ services:
     image: postgres:13
     container_name: postgres
     environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow # pragma: allowlist secret
+      POSTGRES_PASSWORD: airflow # pragma: allowlist secret
+      POSTGRES_DB: airflow # pragma: allowlist secret
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -33,7 +33,7 @@ services:
       - ../configs/secrets.env
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow # pragma: allowlist secret
       GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/google_credentials.json
     volumes:
       - ../configs:/opt/airflow/configs
@@ -64,7 +64,7 @@ services:
     environment:
       AIRFLOW__WEBSERVER__WORKERS: "1"
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow # pragma: allowlist secret
       AIRFLOW__WEBSERVER__RBAC: "True"
       GCS_BUCKET_NAME: trading_dashboard_stock_data
       GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/google_credentials.json
@@ -101,7 +101,7 @@ services:
       - ../configs/secrets.env
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow # pragma: allowlist secret
       GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/configs/google_credentials.json
     volumes:
       - ../configs:/opt/airflow/configs
@@ -133,7 +133,7 @@ services:
     env_file:
       - ../configs/secrets.env
     environment:
-      DB_URI: postgresql+psycopg2://odiurdigital:dashboard@127.0.0.1:5434/project_db
+      DB_URI: postgresql+psycopg2://odiurdigital:dashboard@127.0.0.1:5434/project_db # pragma: allowlist secret
     command: ["streamlit", "run", "app.py"]
     networks:
       - docker_trading_network
