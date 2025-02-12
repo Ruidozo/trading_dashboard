@@ -45,6 +45,8 @@ services:
         airflow users create --username admin --password admin123 --firstname Airflow --lastname Admin --role Admin --email admin@example.com || echo 'User already exists'"
     networks:
       - docker_trading_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  
 
   airflow-webserver:
     build:
@@ -76,6 +78,8 @@ services:
       - ../configs:/opt/airflow/configs
     networks:
       - docker_trading_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -106,12 +110,15 @@ services:
       - airflow_plugins:/opt/airflow/plugins
       - ../data:/opt/airflow/data
     command: ["airflow", "scheduler"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  
     networks:
       - docker_trading_network
     dns:
       - 8.8.8.8
       - 8.8.4.4
     restart: always
+
 
   streamlit:
     build:
@@ -126,7 +133,7 @@ services:
     env_file:
       - ../configs/secrets.env
     environment:
-      DB_URI: 
+      DB_URI: postgresql+psycopg2://odiurdigital:dashboard@127.0.0.1:5434/project_db
     command: ["streamlit", "run", "app.py"]
     networks:
       - docker_trading_network

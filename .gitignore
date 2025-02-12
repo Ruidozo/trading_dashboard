@@ -5,6 +5,7 @@ configs/config.yaml
 configs/airflow_connections.json
 configs/
 dashboard/utils/config.py
+git-secrets/
 
 # Terraform files
 terraform/.terraform/
@@ -137,3 +138,4 @@ tests/
 test_dags/
 notebooks/
 *.pyc
+cloud_sql_proxy
