@@ -17,8 +17,10 @@ from utils.data_loader import (
 )
 from components.charts import plot_dark_candlestick_chart
 from components.indicators import calculate_sma, calculate_ema, calculate_rsi, calculate_bollinger_bands
+import os
 
 st.set_page_config(page_title="Tech Stock Market Dashboard", layout="wide")
+
 
 # Sidebar Navigation
 st.sidebar.header("Navigation")

@@ -1,8 +1,8 @@
 version: '3.8'
 
 networks:
-  trading_network:
-    name: trading_network
+  docker_trading_network:
+    name: docker_trading_network
     driver: bridge
 
 services:
@@ -13,31 +13,15 @@ services:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - trading_network
+      - docker_trading_network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U airflow"]
-      interval: 5s
+      interval: 30s
       timeout: 10s
       retries: 5
-
-  project_postgres:
-    image: postgres:13
-    container_name: project_postgres
-    environment:
-      POSTGRES_USER: odiurdigital
-      POSTGRES_PASSWORD: dashboard
-      POSTGRES_DB: project_db
-    ports:
-      - "5433:5432"
-    volumes:
-      - project_data:/var/lib/postgresql/data
-    networks:
-      - trading_network
 
   airflow-init:
     build:
@@ -45,8 +29,6 @@ services:
       dockerfile: ./Dockerfile
     image: custom-airflow:latest
     container_name: airflow-init
-    depends_on:
-      - postgres
     env_file:
       - ../configs/secrets.env
     environment:
@@ -62,7 +44,7 @@ services:
         airflow db check || airflow db init && airflow db upgrade &&
         airflow users create --username admin --password admin123 --firstname Airflow --lastname Admin --role Admin --email admin@example.com || echo 'User already exists'"
     networks:
-      - trading_network
+      - docker_trading_network
 
   airflow-webserver:
     build:
@@ -73,13 +55,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      project_postgres:
-        condition: service_started 
       airflow-init:
         condition: service_completed_successfully
     env_file:
       - ../configs/secrets.env
     environment:
+      AIRFLOW__WEBSERVER__WORKERS: "1"
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       AIRFLOW__WEBSERVER__RBAC: "True"
@@ -93,12 +74,12 @@ services:
       - airflow_plugins:/opt/airflow/plugins
       - ../data:/opt/airflow/data
       - ../configs:/opt/airflow/configs
-    command: ["airflow", "webserver"]
     networks:
-      - trading_network
+      - docker_trading_network
     dns:
       - 8.8.8.8
       - 8.8.4.4
+    command: ["airflow", "webserver"]
     restart: always
 
   airflow-scheduler:
@@ -110,8 +91,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      project_postgres:
-        condition: service_started
       airflow-init:
         condition: service_completed_successfully
     env_file:
@@ -128,7 +107,7 @@ services:
       - ../data:/opt/airflow/data
     command: ["airflow", "scheduler"]
     networks:
-      - trading_network
+      - docker_trading_network
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -144,9 +123,14 @@ services:
     volumes:
       - ../dashboard:/app
     working_dir: /app
+    env_file:
+      - ../configs/secrets.env
+    environment:
+      DB_URI: 
     command: ["streamlit", "run", "app.py"]
     networks:
-      - trading_network
+      - docker_trading_network
+
 volumes:
   postgres_data:
   project_data:

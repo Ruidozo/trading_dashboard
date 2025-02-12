@@ -3,6 +3,8 @@ configs/google_credentials.json
 configs/secrets.env
 configs/config.yaml
 configs/airflow_connections.json
+configs/
+dashboard/utils/config.py
 
 # Terraform files
 terraform/.terraform/

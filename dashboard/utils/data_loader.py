@@ -1,10 +1,14 @@
+from dotenv import load_dotenv
 import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 import streamlit as st
+import os
 
-# Database connection string (Docker hostname)
-DB_URI = "postgresql://odiurdigital:dashboard@project_postgres:5432/project_db"
+load_dotenv()
+
+DB_URI = os.getenv("DB_URI")
+
 
 def get_db_connection():
     """Creates and returns a database connection."""
