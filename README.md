@@ -1,3 +1,5 @@
+# [Link to the final dashboard](https://trading-dashboard.odiurdigital.com/)
+
 ### **Project Description: Building a Cost-Free Data Engineering Pipeline for Trading Insights**
 
 This project aims to create a comprehensive and fully automated data engineering pipeline to extract, process, and analyze trading data from the **PredictIt API**, identify significant trading patterns or market swings, and present these insights through a visually engaging, interactive dashboard. The pipeline also enriches these insights by integrating relevant news articles, giving users additional context about trading events.
