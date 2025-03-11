@@ -1,4 +1,6 @@
-# [Link to the final dashboard](https://trading-dashboard.odiurdigital.com/)
+# [Preview the final dashboard](https://trading-dashboard.odiurdigital.com/)
+
+You can preview the final dashboard by clicking the link above. This interactive dashboard provides dynamic insights into trading patterns, enriched with contextual news articles. Explore the visualizations, trends, and data metrics to see the project's capabilities in action.
 
 ### **Project Description: Building a Cost-Free Data Engineering Pipeline for Trading Insights**
 
