@@ -8,12 +8,22 @@ from airflow.operators.python import PythonOperator
 from airflow.utils.task_group import TaskGroup
 from airflow.providers.google.cloud.hooks.gcs import GCSHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-import yfinance as yf
+import requests
+
+# ✅ Load environment variable correctly
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
+
+if FINNHUB_API_KEY is None:
+    raise ValueError("🚨 Missing FINNHUB_API_KEY! Ensure it's set in your environment.")
+
 
 # ✅ Environment variables
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 GCS_BUCKET_PROCESSED = os.getenv("GCS_BUCKET_PROCESSED")
 POSTGRES_CONN_ID = "project_postgres"
+API_KEY = os.getenv("FINNHUB_API_KEY")
+FINNHUB_URL = "https://finnhub.io/api/v1/quote"
+
 
 
 if not all([GCS_BUCKET_NAME, GCS_BUCKET_PROCESSED]):
@@ -37,10 +47,21 @@ def fetch_tech_companies():
     conn.close()
     return [company[0] for company in companies]
 
-# ✅ Fetch and Save Stock Data
+# ✅ Function to determine last trading day
+def get_last_trading_day(ref_date):
+    """Adjusts to the last valid trading day if it's a weekend."""
+    if ref_date.weekday() == 5:  # Saturday
+        return ref_date - timedelta(days=1)
+    elif ref_date.weekday() == 6:  # Sunday
+        return ref_date - timedelta(days=2)
+    return ref_date
+
+# ✅ Function to fetch and save stock data using Finnhub
 def fetch_and_save_stock_data():
-    """Fetches stock data from Yahoo Finance and saves it as JSON."""
-    logging.info("🔄 Starting stock data fetch...")
+    """Fetches stock data from Finnhub and saves it as JSON."""
+    logging.info("🔄 Starting stock data fetch using Finnhub...")
+
+    # ✅ Get the list of tech companies from PostgreSQL
     pg_hook = PostgresHook(postgres_conn_id="project_postgres")
     conn = pg_hook.get_conn()
     cursor = conn.cursor()
@@ -49,17 +70,7 @@ def fetch_and_save_stock_data():
     cursor.close()
     conn.close()
 
-    from datetime import datetime, timedelta
-
-    # Use same helper logic to set last trading day.
-    def get_last_trading_day(ref_date):
-        # If ref_date is Saturday (5) or Sunday (6), adjust to Friday.
-        if ref_date.weekday() == 5:
-            return ref_date - timedelta(days=1)
-        elif ref_date.weekday() == 6:
-            return ref_date - timedelta(days=2)
-        return ref_date
-
+    # ✅ Determine the last trading day
     potential_day = (datetime.utcnow() - timedelta(days=1)).date()
     last_trading_day = get_last_trading_day(potential_day)
     date_folder = last_trading_day.strftime('%Y/%m/%d')
@@ -68,42 +79,54 @@ def fetch_and_save_stock_data():
 
     for symbol in companies:
         try:
-            stock = yf.Ticker(symbol)
-            hist = stock.history(period="1d", interval="1d")  # Last available day's data
+            # ✅ Request stock data from Finnhub
+            response = requests.get(f"{FINNHUB_URL}?symbol={symbol}&token={FINNHUB_API_KEY}")
+            
+            if response.status_code == 200:
+                data = response.json()
 
-            if hist.empty:
-                logging.warning(f"⚠️ No valid data received for {symbol}. Skipping.")
-                continue
+                if not data or "c" not in data:
+                    logging.warning(f"⚠️ No valid data received for {symbol}. Skipping.")
+                    continue
 
-            hist.reset_index(inplace=True)
-            hist.rename(columns={
-                "Date": "trade_date",
-                "Open": "opening_price",
-                "High": "highest_price",
-                "Low": "lowest_price",
-                "Close": "closing_price",
-                "Volume": "traded_volume",
-            }, inplace=True)
+                # ✅ Process and reformat data
+                formatted_data = {
+                    "trade_date": utc_date_formatted,
+                    "symbol": symbol,
+                    "opening_price": data.get("o", None),
+                    "highest_price": data.get("h", None),
+                    "lowest_price": data.get("l", None),
+                    "closing_price": data.get("c", None),
+                    "traded_volume": data.get("v", None),
+                    "previous_closing_price": data.get("pc", None),
+                }
 
-            data = hist.to_dict(orient="records")
-            # Overwrite trade_date to match the computed last_trading_day
-            data = [{**row, "trade_date": utc_date_formatted} for row in data]
+                # ✅ Ensure directory exists
+                full_path = os.path.join("/opt/airflow/data/raw/", date_folder)
+                os.makedirs(full_path, exist_ok=True)
 
-            full_path = os.path.join("/opt/airflow/data/raw/", date_folder)
-            os.makedirs(full_path, exist_ok=True)
+                # ✅ Save data as JSON
+                file_path = os.path.join(full_path, f"{symbol}_{utc_date_str}.json")
+                with open(file_path, "w") as f:
+                    json.dump([formatted_data], f)
 
-            file_path = os.path.join(full_path, f"{symbol}_{utc_date_str}.json")
-            with open(file_path, "w") as f:
-                json.dump(data, f)
+                logging.info(f"✅ Data saved: {file_path}")
 
-            logging.info(f"✅ Data saved: {file_path}")
-            time.sleep(0)
+                # ✅ Add delay to prevent Finnhub rate limiting
+                time.sleep(1.5)
 
-        except Exception as e:
-            logging.error(f"❌ Error fetching stock data for {symbol}: {e}")
-    
-    logging.info("🚀 Finished fetching stock data.")
+            elif response.status_code == 429:
+                logging.warning(f"⚠️ Finnhub rate limit hit. Sleeping for 60 seconds...")
+                time.sleep(60)
+                continue  # Retry after sleeping
 
+            else:
+                logging.error(f"❌ Error fetching data for {symbol}: {response.text}")
+
+        except requests.exceptions.RequestException as e:
+            logging.error(f"❌ API request failed for {symbol}: {e}")
+
+    logging.info("🚀 Finished fetching stock data using Finnhub.")
 # ✅ Upload JSON to GCS
 def upload_json_to_gcs():
     gcs_hook = GCSHook(gcp_conn_id="google_cloud_default")
@@ -282,10 +305,17 @@ def load_parquet_to_postgres():
                 df[col] = 0 if col in ["c", "d", "dp", "h", "l", "o", "v"] else None
 
         # ✅ Step 9: Convert data types
+        # ✅ Ensure missing values are filled before conversion
+        df["d"] = df["d"].fillna(0)  # Dividends → Default to 0
+        df["dp"] = df["dp"].fillna(0)  # Stock Splits → Default to 0
+        df["v"] = df["v"].fillna(0).astype(int)  # Traded Volume → Default to 0 (int)
+
+        # ✅ Convert data types safely
         df = df.astype({
-            "c": float, "h": float, "l": float, "o": float, "v": int,
-            "d": float, "dp": float
+            "c": float, "h": float, "l": float, "o": float, 
+            "d": float, "dp": float, "v": int
         })
+
         if "date" in df.columns:
             df = df.loc[:, ~df.columns.duplicated()].copy()
             df["date"] = pd.to_datetime(df["date"]).dt.date

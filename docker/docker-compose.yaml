@@ -6,6 +6,15 @@ networks:
     driver: bridge
 
 services:
+  cloudsql-proxy:
+    image: gcr.io/cloudsql-docker/gce-proxy:1.19.1
+    container_name: cloudsql-proxy
+    command: /cloud_sql_proxy -instances=trading-dashboard-449211:us-central1:trading-dashboard-db=tcp:0.0.0.0:5432 -credential_file=/secrets/cloudsql/credentials.json
+    volumes:
+      - ../configs/google_credentials.json:/secrets/cloudsql/credentials.json
+    networks:
+      - docker_trading_network
+
   postgres:
     image: postgres:13
     container_name: postgres
@@ -13,6 +22,7 @@ services:
       POSTGRES_USER: airflow # pragma: allowlist secret
       POSTGRES_PASSWORD: airflow # pragma: allowlist secret
       POSTGRES_DB: airflow # pragma: allowlist secret
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -22,6 +32,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    command: ["postgres", "-c", "listen_addresses=0.0.0.0"]
 
   airflow-init:
     build:
@@ -47,6 +61,9 @@ services:
       - docker_trading_network
     extra_hosts:
       - "host.docker.internal:host-gateway"  
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
 
   airflow-webserver:
     build:
@@ -118,25 +135,6 @@ services:
       - 8.8.8.8
       - 8.8.4.4
     restart: always
-
-
-  streamlit:
-    build:
-      context: ../dashboard
-      dockerfile: Dockerfile
-    container_name: streamlit_app
-    ports:
-      - "8501:8501"
-    volumes:
-      - ../dashboard:/app
-    working_dir: /app
-    env_file:
-      - ../configs/secrets.env
-    environment:
-      DB_URI: postgresql+psycopg2://odiurdigital:dashboard@127.0.0.1:5434/project_db # pragma: allowlist secret
-    command: ["streamlit", "run", "app.py"]
-    networks:
-      - docker_trading_network
 
 volumes:
   postgres_data:

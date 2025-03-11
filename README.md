@@ -40,3 +40,6 @@ The development process focuses on **local testing** and eventual deployment to 
 This project is designed to be an end-to-end solution for ingesting, analyzing, and presenting trading data insights without incurring any costs. It leverages free-tier cloud resources and modern data tools, making it an excellent demonstration of scalable, real-world data engineering practices.
 
 The result will be a fully operational dashboard hosted on GCP, capable of providing dynamic insights into trading patterns with enriched contextual news. This project is ideal for showcasing expertise in data engineering, cloud platforms, and modern development workflows.
+
+
+[Link to the final dashboard](https://trading-dashboard.odiurdigital.com/)

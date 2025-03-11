@@ -15,8 +15,9 @@ COPY . .
 # Copy the .env file to the container
 COPY .env .env
 
-# Expose Streamlit's default port
-EXPOSE 8501
+# Expose the port specified by the PORT environment variable
+ENV PORT 8080
+EXPOSE 8080
 
 # Run the Streamlit app
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["sh", "-c", "streamlit run app.py --server.port=$PORT --server.address=0.0.0.0"]

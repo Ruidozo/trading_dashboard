@@ -1,4 +1,7 @@
 import os
-# Configurations (e.g., DB connection)
-# PostgreSQL Database connection string (Docker hostname)
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 DB_URI = os.getenv("DB_URI")
